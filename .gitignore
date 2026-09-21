@@ -1,0 +1,38 @@
+# Dependencies — install with `npm install` inside app/ ; the lib-side links
+# under node_modules/ are symlinks into app/node_modules and are recreated by
+# the plugin's own setup.
+node_modules/
+
+# Chat runtime state.
+#
+# app/.ttot-sessions.json holds LIVE session tokens and plaintext chat
+# passwords, so it must never be committed.
+app/.ttot-sessions.json
+app/.ttot-plugin.json
+app/.ttot-ui.json
+app/.ttot.pid
+
+# Chat database (users, messages, friends) — machine-local data.
+app/data.db
+app/data.db-shm
+app/data.db-wal
+
+# Logs (debug.log contains message bodies and usernames).
+app/debug.log
+app/.ttot-server.log
+app/server.log
+app/server_stdout.log
+*.log
+
+# Self-signed TLS material for the local HTTPS listener. Regenerate with
+# `openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 365`.
+app/key.pem
+app/cert.pem
+
+# Uploaded images / videos.
+app/uploads/*
+!app/uploads/.gitkeep
+
+# One-off local maintenance script (hardcodes this machine's paths and
+# rewrites lib/index.js in place).
+.trim.cjs

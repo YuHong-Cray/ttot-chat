@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>聊聊 - 即时聊天</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- ===== Auth Overlay ===== -->
+  <div id="auth-overlay" class="overlay">
+    <div class="auth-box">
+      <h1>聊聊</h1>
+      <p class="subtitle">即时聊天工具</p>
+
+      <div class="tabs">
+        <button class="tab active" data-tab="login">登录</button>
+        <button class="tab" data-tab="register">注册</button>
+      </div>
+
+      <form id="login-form" class="auth-form">
+        <input type="text" placeholder="手机号 / 用户名" maxlength="20" required>
+        <input type="password" placeholder="密码" maxlength="50" required>
+        <button type="submit">登录</button>
+        <p class="auth-error"></p>
+      </form>
+
+      <form id="register-form" class="auth-form hidden">
+        <div class="phone-row">
+          <input type="tel" id="reg-phone" placeholder="手机号" maxlength="11" required>
+          <button type="button" id="send-code-btn">发送验证码</button>
+        </div>
+        <input type="text" id="reg-code" placeholder="验证码" maxlength="6" required>
+        <input type="password" placeholder="设置密码（至少4位）" maxlength="50" required>
+        <input type="password" placeholder="确认密码" maxlength="50" required>
+        <button type="submit">注册</button>
+        <p class="auth-error"></p>
+      </form>
+    </div>
+  </div>
+
+  <!-- ===== Chat ===== -->
+  <div id="chat-container" class="hidden">
+    <aside id="sidebar">
+      <div class="sidebar-header">
+        <h3>在线用户</h3>
+        <span id="user-count">0</span>
+      </div>
+      <ul id="user-list"></ul>
+
+      <!-- Group section -->
+      <div id="group-section" class="hidden">
+        <div class="group-header">
+          <h3>群聊</h3>
+          <button id="create-group-btn" title="创建群聊">+</button>
+        </div>
+        <ul id="group-list"></ul>
+      </div>
+
+      <!-- Admin panel -->
+      <div id="admin-panel" class="hidden">
+        <div class="admin-header">
+          <h3>管理面板</h3>
+          <button id="admin-toggle">展开</button>
+        </div>
+        <div id="admin-body" class="hidden">
+          <div class="admin-tabs">
+            <button class="admin-tab active" data-atab="pending">待审批</button>
+            <button class="admin-tab" data-atab="all">全部用户</button>
+          </div>
+          <div id="admin-pending-section">
+            <p class="admin-empty">暂无待审批用户</p>
+            <div id="admin-pending-list"></div>
+          </div>
+          <div id="admin-all-section" class="hidden">
+            <div id="admin-all-list"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <span id="my-name"></span>
+        <div class="footer-actions">
+          <button id="sound-toggle" title="提示音">🔔</button>
+          <button id="profile-btn" title="个人资料">👤</button>
+          <button id="moments-btn" title="朋友圈"><span class="moments-circle-icon"></span></button>
+          <span id="footer-more" class="footer-more">···</span>
+          <div id="footer-extra" class="footer-extra hidden">
+            <button id="conf-room-btn" title="会议">📞</button>
+            <button id="change-pw-btn" title="修改密码">🔑</button>
+            <button id="logout-btn">退出</button>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <main id="main">
+      <header id="chat-header">
+        <h2>聊聊</h2>
+        <span id="typing-indicator" class="hidden"></span>
+      </header>
+
+      <div id="private-bar" class="hidden">
+        <button id="back-to-public">← 返回好友动态</button>
+        <span>与 <strong id="private-name"></strong> 私密聊天中</span>
+      </div>
+
+      <div id="group-bar" class="hidden">
+        <button id="back-from-group">← 返回好友动态</button>
+        <span>在群组 <strong id="group-bar-name"></strong> 中</span>
+      </div>
+
+      <div id="messages"></div>
+
+      <div id="input-area">
+        <button id="screenshot-btn" title="截图" aria-label="截图">📷</button>
+        <button id="upload-btn" title="上传图片/视频" aria-label="上传图片/视频">📁</button>
+        <input type="file" id="file-input" accept="image/*,video/*" hidden>
+        <input type="text" id="msg-input" placeholder="输入消息..." maxlength="500">
+        <button id="send-btn">发送</button>
+      </div>
+    </main>
+  </div>
+
+  <!-- ===== Incoming Call Modal ===== -->
+  <div id="incoming-call" class="overlay hidden" style="z-index:998;">
+    <div class="auth-box" style="width:320px;text-align:center;padding:32px;">
+      <div id="incoming-call-icon" style="font-size:48px;margin-bottom:8px;">📹</div>
+      <h2 id="incoming-caller-name" style="font-size:20px;margin-bottom:4px;"></h2>
+      <p id="incoming-call-mode" style="color:#999;font-size:14px;margin-bottom:20px;">视频通话...</p>
+      <div style="display:flex;gap:16px;justify-content:center;">
+        <button id="call-accept-btn" style="min-width:80px;padding:10px 24px;background:#4caf50;color:#fff;border:none;border-radius:24px;font-size:15px;font-weight:600;cursor:pointer;">接受</button>
+        <button id="call-decline-btn" style="min-width:80px;padding:10px 24px;background:#e74c3c;color:#fff;border:none;border-radius:24px;font-size:15px;font-weight:600;cursor:pointer;">拒绝</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Active Call Overlay ===== -->
+  <div id="call-overlay" class="hidden">
+    <div id="call-remote-container">
+      <video id="remote-video" autoplay playsinline></video>
+      <div id="call-audio-placeholder">
+        <div id="call-audio-icon">📞</div>
+        <div id="call-audio-name"></div>
+      </div>
+    </div>
+    <div id="call-local-container">
+      <video id="local-video" autoplay playsinline muted></video>
+    </div>
+    <div id="call-timer">00:00</div>
+    <div id="call-status" class="hidden"></div>
+    <div id="call-controls">
+      <button id="call-mic-btn" class="call-ctrl-btn" title="麦克风">🎤</button>
+      <button id="call-cam-btn" class="call-ctrl-btn" title="摄像头">📹</button>
+      <button id="call-hangup-btn" class="call-ctrl-btn call-hangup" title="挂断">📞</button>
+    </div>
+  </div>
+
+  <!-- ===== Change Password Modal ===== -->
+  <div id="pw-modal" class="overlay hidden" style="z-index:999;">
+    <div class="auth-box" style="width:340px;">
+      <h1 style="font-size:20px;">修改密码</h1>
+      <form id="pw-form" class="auth-form" style="margin-top:16px;">
+        <input type="password" placeholder="旧密码" maxlength="50" required>
+        <input type="password" placeholder="新密码（至少4位）" maxlength="50" required>
+        <input type="password" placeholder="确认新密码" maxlength="50" required>
+        <button type="submit">确认修改</button>
+        <p class="auth-error"></p>
+        <p class="auth-success"></p>
+      </form>
+      <button id="pw-cancel" style="display:block;margin:8px auto 0;background:none;border:none;color:#999;font-size:13px;cursor:pointer;">取消</button>
+    </div>
+  </div>
+
+  <!-- ===== Profile Modal ===== -->
+  <div id="profile-modal" class="overlay hidden" style="z-index:999;">
+    <div class="auth-box profile-box">
+      <h1 style="font-size:20px;text-align:center;">个人资料</h1>
+      <div class="profile-avatar-section">
+        <img id="profile-avatar-preview" src="" alt="头像" class="profile-avatar-large">
+        <button id="profile-avatar-btn" class="profile-avatar-btn">更换头像</button>
+        <input type="file" id="profile-avatar-input" accept="image/*" hidden>
+      </div>
+      <form id="profile-form" class="auth-form" style="margin-top:12px;">
+        <input type="text" id="pf-nickname" placeholder="昵称" maxlength="30">
+        <input type="text" id="pf-fullname" placeholder="姓名" maxlength="30">
+        <input type="date" id="pf-birthdate" placeholder="出生日期">
+        <input type="text" id="pf-occupation" placeholder="职业" maxlength="50">
+        <input type="text" id="pf-birthplace" placeholder="出生地" maxlength="50">
+        <button type="submit">保存</button>
+        <p class="auth-error"></p>
+        <p class="auth-success"></p>
+      </form>
+      <button id="profile-cancel" style="display:block;margin:8px auto 0;background:none;border:none;color:#999;font-size:13px;cursor:pointer;">关闭</button>
+    </div>
+  </div>
+
+  <!-- ===== Create Group Modal ===== -->
+  <div id="create-group-modal" class="overlay hidden" style="z-index:999;">
+    <div class="auth-box" style="width:360px;">
+      <h1 style="font-size:20px;text-align:center;">创建群聊</h1>
+      <form id="create-group-form" class="auth-form" style="margin-top:12px;">
+        <input type="text" id="cg-name" placeholder="群名称" maxlength="30" required>
+        <div class="friend-select">
+          <p style="font-size:13px;color:#888;margin-bottom:6px;">选择好友加入：</p>
+          <div id="cg-friend-list" class="friend-select-list"></div>
+        </div>
+        <button type="submit">创建</button>
+        <p class="auth-error"></p>
+      </form>
+      <button id="create-group-cancel" style="display:block;margin:8px auto 0;background:none;border:none;color:#999;font-size:13px;cursor:pointer;">取消</button>
+    </div>
+  </div>
+
+  <!-- ===== Invite Group Modal ===== -->
+  <div id="invite-group-modal" class="overlay hidden" style="z-index:999;">
+    <div class="auth-box" style="width:360px;">
+      <h1 style="font-size:20px;text-align:center;">邀请好友</h1>
+      <div class="friend-select" style="margin-top:12px;">
+        <div id="ig-friend-list" class="friend-select-list"></div>
+      </div>
+      <button id="invite-group-btn" style="display:block;width:100%;padding:10px;margin-top:12px;background:#667eea;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;">邀请</button>
+      <p id="invite-group-error" class="auth-error"></p>
+      <button id="invite-group-cancel" style="display:block;margin:8px auto 0;background:none;border:none;color:#999;font-size:13px;cursor:pointer;">关闭</button>
+    </div>
+  </div>
+
+  <!-- ===== Conference Invite Notification ===== -->
+  <div id="conf-invite" class="overlay hidden" style="z-index:998;">
+    <div class="auth-box" style="width:320px;text-align:center;padding:32px;">
+      <div style="font-size:48px;margin-bottom:8px;">📹</div>
+      <h2 id="conf-invite-title" style="font-size:20px;margin-bottom:4px;"></h2>
+      <p id="conf-invite-desc" style="color:#999;font-size:14px;margin-bottom:20px;">邀请您加入会议</p>
+      <div style="display:flex;gap:16px;justify-content:center;">
+        <button id="conf-accept-btn" style="min-width:80px;padding:10px 24px;background:#4caf50;color:#fff;border:none;border-radius:24px;font-size:15px;font-weight:600;cursor:pointer;">加入</button>
+        <button id="conf-decline-btn" style="min-width:80px;padding:10px 24px;background:#e74c3c;color:#fff;border:none;border-radius:24px;font-size:15px;font-weight:600;cursor:pointer;">忽略</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Conference Overlay ===== -->
+  <div id="conf-overlay" class="hidden">
+    <div id="conf-body">
+      <div id="conf-main-area">
+        <video id="conf-main-video" autoplay playsinline></video>
+        <div id="conf-main-placeholder">
+          <div id="conf-main-placeholder-icon">📹</div>
+          <div id="conf-main-placeholder-text">会议进行中...</div>
+        </div>
+      </div>
+      <div id="conf-video-sidebar">
+        <div id="conf-video-grid"></div>
+      </div>
+    </div>
+    <div id="conf-subtitle-area" class="hidden">
+      <div id="conf-subtitle-text"></div>
+    </div>
+    <div id="conf-participants-panel" class="hidden">
+      <div id="conf-participants-header">
+        <span>参与者</span>
+        <button id="conf-close-panel">×</button>
+      </div>
+      <div id="conf-participant-list"></div>
+    </div>
+    <div id="conf-timer">00:00</div>
+    <div id="conf-controls">
+      <button id="conf-mic-btn" class="call-ctrl-btn" title="麦克风">🎤</button>
+      <button id="conf-cam-btn" class="call-ctrl-btn" title="摄像头">📹</button>
+      <button id="conf-screen-btn" class="call-ctrl-btn" title="共享屏幕">🖥️</button>
+      <button id="conf-subtitle-btn" class="call-ctrl-btn" title="字幕/翻译">💬</button>
+      <button id="conf-participants-btn" class="call-ctrl-btn" title="参与者">👥</button>
+      <button id="conf-invite-btn" class="call-ctrl-btn" title="邀请">➕</button>
+      <button id="conf-host-btn" class="call-ctrl-btn hidden" title="转移主持人">👑</button>
+      <button id="conf-end-btn" class="call-ctrl-btn hidden" title="结束会议" style="color:#e74c3c;">⏹</button>
+      <button id="conf-leave-btn" class="call-ctrl-btn conf-hangup" title="离开会议">📞</button>
+    </div>
+  </div>
+
+  <!-- ===== Conference Room Modal (create / join) ===== -->
+  <div id="conf-room-modal" class="overlay hidden" style="z-index:999;">
+    <div class="auth-box" style="width:360px;">
+      <h1 style="font-size:20px;text-align:center;">会议</h1>
+      <div style="display:flex;gap:8px;margin-top:16px;">
+        <button id="conf-create-btn" style="flex:1;padding:12px;background:#667eea;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;">创建会议</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;align-items:center;">
+        <input type="text" id="conf-join-input" placeholder="输入会议码加入" style="flex:1;padding:10px 14px;border:2px solid #e0e0e0;border-radius:10px;font-size:14px;outline:none;">
+        <button id="conf-join-btn" style="padding:10px 16px;background:#4caf50;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;">加入</button>
+      </div>
+      <p id="conf-room-error" class="auth-error" style="margin-top:8px;"></p>
+      <button id="conf-room-close" style="display:block;margin:12px auto 0;background:none;border:none;color:#999;font-size:13px;cursor:pointer;">关闭</button>
+      <!-- Invite friend list (shown after room created) -->
+      <div id="conf-invite-friends" class="hidden" style="margin-top:12px;border-top:1px solid #e0e0e0;padding-top:12px;">
+        <p style="font-size:13px;color:#888;margin-bottom:6px;">邀请好友：</p>
+        <div id="conf-invite-friend-list" style="max-height:150px;overflow-y:auto;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Moments Page ===== -->
+  <div id="moments-page" class="hidden" style="position:fixed;inset:0;z-index:990;background:#f5f5f5;display:none;flex-direction:column;">
+    <div id="moments-header" style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px;background:#fff;border-bottom:1px solid #e0e0e0;">
+      <button id="moments-back" style="padding:4px 12px;background:none;border:1px solid #ddd;border-radius:6px;font-size:13px;color:#666;cursor:pointer;">返回</button>
+      <h2 style="font-size:18px;font-weight:600;color:#333;">朋友圈</h2>
+      <span style="width:52px;"></span>
+    </div>
+    <div id="moments-input-area">
+      <textarea id="mi-content" placeholder="说说你的心情..." maxlength="2000"></textarea>
+      <div id="mi-image-preview" class="mi-image-preview"></div>
+      <div class="mi-toolbar">
+        <button id="mi-image-btn" type="button" title="添加图片">📷 图片</button>
+        <input type="file" id="mi-image-input" accept="image/*" multiple hidden>
+        <input type="text" id="mi-link-url" class="mi-url-input" placeholder="链接 URL" style="display:none;">
+        <input type="text" id="mi-link-title" class="mi-url-input" placeholder="链接标题" style="display:none;">
+        <input type="text" id="mi-music-url" class="mi-url-input" placeholder="音乐 URL" style="display:none;">
+        <input type="text" id="mi-video-url" class="mi-url-input" placeholder="视频 URL" style="display:none;">
+      </div>
+      <div class="mi-actions">
+        <span id="mi-error" class="mi-error"></span>
+        <button id="mi-submit">发布</button>
+      </div>
+    </div>
+    <div id="moments-feed" style="flex:1;overflow-y:auto;padding:12px 16px;"></div>
+    <div id="moments-loading" class="hidden" style="text-align:center;padding:12px;color:#999;font-size:13px;">加载中...</div>
+  </div>
+
+  <!-- ===== Create Moment Modal ===== -->
+  <div id="create-moment-modal" class="overlay hidden" style="z-index:999;">
+    <div class="auth-box" style="width:420px;max-height:90vh;overflow-y:auto;">
+      <h1 style="font-size:18px;text-align:center;margin-bottom:12px;">发表动态</h1>
+      <textarea id="mm-content" placeholder="说说你的心情..." style="width:100%;min-height:80px;padding:10px 14px;border:2px solid #e0e0e0;border-radius:10px;font-size:14px;outline:none;resize:none;font-family:inherit;" maxlength="2000"></textarea>
+      <div id="mm-image-preview" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;"></div>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button id="mm-add-image-btn" style="padding:6px 14px;background:#f0f2f5;border:1px solid #ddd;border-radius:8px;font-size:13px;cursor:pointer;">📷 添加图片</button>
+        <input type="file" id="mm-image-input" accept="image/*" multiple hidden>
+      </div>
+      <input type="text" id="mm-link-url" placeholder="链接 URL" style="width:100%;padding:8px 12px;border:2px solid #e0e0e0;border-radius:8px;font-size:13px;outline:none;margin-top:8px;">
+      <input type="text" id="mm-link-title" placeholder="链接标题" style="width:100%;padding:8px 12px;border:2px solid #e0e0e0;border-radius:8px;font-size:13px;outline:none;margin-top:6px;">
+      <input type="text" id="mm-music-url" placeholder="音乐 URL" style="width:100%;padding:8px 12px;border:2px solid #e0e0e0;border-radius:8px;font-size:13px;outline:none;margin-top:6px;">
+      <input type="text" id="mm-video-url" placeholder="视频 URL" style="width:100%;padding:8px 12px;border:2px solid #e0e0e0;border-radius:8px;font-size:13px;outline:none;margin-top:6px;">
+      <p id="mm-error" class="auth-error" style="margin-top:8px;"></p>
+      <button id="mm-submit" style="display:block;width:100%;padding:10px;margin-top:10px;background:#667eea;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;">发表</button>
+      <button id="mm-cancel" style="display:block;margin:8px auto 0;background:none;border:none;color:#999;font-size:13px;cursor:pointer;">取消</button>
+    </div>
+  </div>
+
+  <!-- ===== Lightbox ===== -->
+  <div id="lightbox">
+    <img src="" alt="">
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

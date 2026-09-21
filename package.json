@@ -1,0 +1,31 @@
+{
+  "name": "ttot-chat",
+  "version": "1.0.0",
+  "description": "DSH plugin: T-to-T (聊聊) instant-messaging web app — server lifecycle plus a model tool for chat operations",
+  "type": "module",
+  "main": "lib/index.js",
+  "license": "MIT",
+  "files": [
+    "lib",
+    "app",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "chat",
+    "im",
+    "instant-messaging",
+    "wechat"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

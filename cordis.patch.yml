@@ -1,0 +1,20 @@
+# ttot-chat bundle patch — mounted after the bundle layers it depends on (the
+# base bundle's tool registry row and the web server).
+#   - ttot    → the `ttot` model tool: chat-server lifecycle + API/WS chat ops;
+#               user management reads and writes the dsh-login MySQL account base.
+#   - ttot-ui → the Web-GUI entry button (a floating 「聊聊」 pill injected into
+#               index.html). It lives in its own module file, loaded by the
+#               package SUBPATH specifier `ttot-chat/lib/ui.js`: a running process
+#               never re-imports a row by name, so a fix reaches it only through a
+#               module URL it has not loaded yet.
+#
+# A profile's own cordis.patch.yml may also carry these rows for the live-reload
+# path (bundle layers are frozen at boot; user patch files are re-read on change).
+# The plugin modules guard against double mounting.
+- insert:
+    - id: ttot
+      name: 'ttot-chat'
+      inject: [tools]
+    - id: ttot-ui
+      name: 'ttot-chat/lib/ui2.js'
+      inject: [webServer]
