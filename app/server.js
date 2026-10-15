@@ -271,7 +271,21 @@ db.exec(`
   );
 `);
 
-// Moments (朋友圈)
+// Private (1:1) messages — persisted so history survives a page refresh.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS private_messages (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id_1  INTEGER NOT NULL,
+    user_id_2  INTEGER NOT NULL,
+    sender_id  INTEGER NOT NULL,
+    type       TEXT DEFAULT 'text',
+    content    TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (sender_id) REFERENCES users(id)
+  );
+`);
+
+// Moments (同事圈)
 db.exec(`
   CREATE TABLE IF NOT EXISTS moments (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -351,14 +365,14 @@ app.use(express.json());
 //   SMS_PROVIDER=mock|aliyun    (默认 mock, 验证码打印到控制台)
 //   ALIYUN_ACCESS_KEY=xxx        (阿里云 SMS 时需配置)
 //   ALIYUN_SECRET_KEY=xxx
-//   SMS_SIGN_NAME=聊聊            (短信签名)
+//   SMS_SIGN_NAME=企业里的同事圈            (短信签名)
 //   SMS_TEMPLATE_CODE=SMS_xxxxx  (短信模板 Code)
 const SMS_PROVIDER = (process.env.SMS_PROVIDER || 'mock').toLowerCase();
 const SMS_CONFIG = {
   aliyun: {
     accessKey: process.env.ALIYUN_ACCESS_KEY || '',
     secretKey: process.env.ALIYUN_SECRET_KEY || '',
-    signName: process.env.SMS_SIGN_NAME || '聊聊',
+    signName: process.env.SMS_SIGN_NAME || '企业里的同事圈',
     templateCode: process.env.SMS_TEMPLATE_CODE || '',
   },
 };
@@ -688,6 +702,29 @@ app.post('/api/admin/delete-group-message', authRequired, adminRequired, (req, r
   res.json({ success: true, message: '消息已删除' });
 });
 
+// Member: recall your own group message (within 2 min); admins may delete any.
+app.post('/api/groups/delete-message', authRequired, (req, res) => {
+  const { messageId } = req.body;
+  if (!messageId) return res.status(400).json({ error: '缺少消息ID' });
+  const msg = db.prepare('SELECT id, group_id, user_id, created_at FROM group_messages WHERE id = ?').get(messageId);
+  if (!msg) return res.status(404).json({ error: '消息不存在或已撤回' });
+  const isMember = db.prepare('SELECT id FROM group_members WHERE group_id = ? AND user_id = ?').get(msg.group_id, req.user.id);
+  if (!isMember) return res.status(403).json({ error: '您不在该群中' });
+  const isAdmin = req.user.role === 'admin';
+  const isOwn = Number(msg.user_id) === Number(req.user.id);
+  let withinLimit = false;
+  try {
+    const created = new Date(String(msg.created_at).replace(' ', 'T') + 'Z').getTime();
+    withinLimit = (Date.now() - created) < 2 * 60 * 1000;
+  } catch { withinLimit = false; }
+  if (!isAdmin && !(isOwn && withinLimit)) {
+    return res.status(403).json({ error: '只能撤回自己 2 分钟内发送的消息' });
+  }
+  db.prepare('DELETE FROM group_messages WHERE id = ?').run(messageId);
+  notifyGroup(msg.group_id, { type: 'group_message_deleted', messageId: parseInt(messageId) });
+  res.json({ success: true, message: '消息已撤回' });
+});
+
 // ── Friend Routes ──
 app.get('/api/friends/statuses', authRequired, (req, res) => {
   const outgoing = db.prepare(
@@ -703,14 +740,16 @@ app.get('/api/friends/statuses', authRequired, (req, res) => {
   ).all(req.user.id, req.user.id);
   let friendIds = friendRows.map(r => r.user_id_1 == req.user.id ? r.user_id_2 : r.user_id_1);
   // Filter out friends that no longer exist in users table (orphaned entries)
+  let friendNames = {};
   if (friendIds.length > 0) {
     const placeholders = friendIds.map(() => '?').join(',');
-    const validIds = db.prepare(`SELECT id FROM users WHERE id IN (${placeholders})`).all(...friendIds);
+    const validIds = db.prepare(`SELECT id, username FROM users WHERE id IN (${placeholders})`).all(...friendIds);
     const validSet = new Set(validIds.map(r => r.id));
     friendIds = friendIds.filter(id => validSet.has(id));
+    validIds.forEach(r => { friendNames[r.id] = r.username; });
   }
 
-  res.json({ friendIds, outgoingIds: outgoing.map(r => r.userId), incoming: incoming.map(r => ({ requestId: r.requestId, userId: r.userId })) });
+  res.json({ friendIds, friendNames, outgoingIds: outgoing.map(r => r.userId), incoming: incoming.map(r => ({ requestId: r.requestId, userId: r.userId })) });
 });
 
 app.post('/api/friends/request', authRequired, (req, res) => {
@@ -763,6 +802,22 @@ app.post('/api/friends/respond', authRequired, (req, res) => {
   }
 });
 
+// Remove a friend (both directions). The other user is notified, but their
+// message history is left untouched.
+app.post('/api/friends/remove', authRequired, (req, res) => {
+  const { userId } = req.body;
+  if (!userId) return res.status(400).json({ error: '缺少用户' });
+  if (Number(userId) === Number(req.user.id)) return res.status(400).json({ error: '不能删除自己' });
+  const uid1 = Math.min(req.user.id, Number(userId));
+  const uid2 = Math.max(req.user.id, Number(userId));
+  db.prepare('DELETE FROM friends WHERE user_id_1 = ? AND user_id_2 = ?').run(uid1, uid2);
+  // Clean up any friend requests between the two, so a later re-add creates a
+  // fresh pending request (otherwise the stale 'accepted' row blocks re-adding).
+  db.prepare("DELETE FROM friend_requests WHERE ((from_user_id = ? AND to_user_id = ?) OR (from_user_id = ? AND to_user_id = ?))").run(req.user.id, Number(userId), Number(userId), req.user.id);
+  notifyUser(Number(userId), { type: 'friend_removed', userId: req.user.id, name: req.user.username });
+  res.json({ success: true, message: '已删除好友' });
+});
+
 // ── Change Password ──
 app.post('/api/change-password', authRequired, (req, res) => {
   const { oldPassword, newPassword } = req.body;
@@ -787,7 +842,7 @@ app.post('/api/upload', authRequired, (req, res) => {
       return res.status(400).json({ error: err.message });
     }
     if (!req.file) return res.status(400).json({ error: '请选择图片文件' });
-    res.json({ url: `/uploads/${req.file.filename}` });
+    res.json({ url: `uploads/${req.file.filename}` });
   });
 });
 
@@ -807,7 +862,7 @@ app.post('/api/profile/avatar', authRequired, (req, res) => {
   avatarUpload.single('avatar')(req, res, (err) => {
     if (err) return res.status(400).json({ error: err.message || '头像上传失败' });
     if (!req.file) return res.status(400).json({ error: '请选择头像图片' });
-    const url = `/uploads/${req.file.filename}`;
+    const url = `uploads/${req.file.filename}`;
     // Merge: preserve existing profile fields when updating avatar
     const existing = db.prepare('SELECT * FROM profiles WHERE user_id = ?').get(req.user.id) || {};
     db.prepare(
@@ -891,6 +946,20 @@ app.get('/api/groups', authRequired, (req, res) => {
 });
 
 // Get group messages
+// Load private (1:1) message history between the current user and a partner.
+app.get('/api/messages/:userId', authRequired, (req, res) => {
+  const partnerId = Number(req.params.userId);
+  const uid1 = Math.min(req.user.id, partnerId);
+  const uid2 = Math.max(req.user.id, partnerId);
+  const msgs = db.prepare(`
+    SELECT id, sender_id, type, content, created_at,
+           (SELECT username FROM users WHERE id = sender_id) AS sender_name
+    FROM private_messages WHERE user_id_1 = ? AND user_id_2 = ?
+    ORDER BY id ASC LIMIT 200
+  `).all(uid1, uid2);
+  res.json({ messages: msgs });
+});
+
 app.get('/api/groups/:id/messages', authRequired, (req, res) => {
   const groupId = req.params.id;
   // Check membership
@@ -990,14 +1059,14 @@ app.delete('/api/groups/:id', authRequired, (req, res) => {
   res.json({ success: true });
 });
 
-// ── Moments Routes (朋友圈) ──
+// ── Moments Routes (同事圈) ──
 
 // Upload moment images (max 9)
 app.post('/api/moments/upload-images', authRequired, (req, res) => {
   upload.array('images', 9)(req, res, (err) => {
     if (err) return res.status(400).json({ error: err.message || '上传失败' });
     if (!req.files || req.files.length === 0) return res.status(400).json({ error: '请选择图片' });
-    const urls = req.files.map(f => `/uploads/${f.filename}`);
+    const urls = req.files.map(f => `uploads/${f.filename}`);
     res.json({ urls });
   });
 });
@@ -1214,7 +1283,9 @@ wss.on('connection', (ws) => {
             ws.send(JSON.stringify({ type: 'system', text: '你们还不是好友，无法发送私密消息' }));
             return;
           }
-          sendToUser(ws, { type: 'private_message', text: data.text.trim(), fromUserId: userId, fromName: username }, data.targetUserId);
+          sendToUser(ws, { type: 'private_message', text: data.text.trim(), fromUserId: userId, fromName: username, msgId: data.msgId }, data.targetUserId);
+          const _u1 = Math.min(userId, Number(data.targetUserId)), _u2 = Math.max(userId, Number(data.targetUserId));
+          db.prepare('INSERT INTO private_messages (user_id_1, user_id_2, sender_id, type, content) VALUES (?, ?, ?, ?, ?)').run(_u1, _u2, userId, 'text', data.text.trim());
         }
         break;
 
@@ -1224,7 +1295,9 @@ wss.on('connection', (ws) => {
             ws.send(JSON.stringify({ type: 'system', text: '你们还不是好友，无法发送私密图片' }));
             return;
           }
-          sendToUser(ws, { type: 'private_image', url: data.url, fromUserId: userId, fromName: username }, data.targetUserId);
+          sendToUser(ws, { type: 'private_image', url: data.url, fromUserId: userId, fromName: username, msgId: data.msgId }, data.targetUserId);
+          const _u1 = Math.min(userId, Number(data.targetUserId)), _u2 = Math.max(userId, Number(data.targetUserId));
+          db.prepare('INSERT INTO private_messages (user_id_1, user_id_2, sender_id, type, content) VALUES (?, ?, ?, ?, ?)').run(_u1, _u2, userId, 'image', data.url);
         }
         break;
 
@@ -1234,7 +1307,15 @@ wss.on('connection', (ws) => {
             ws.send(JSON.stringify({ type: 'system', text: '你们还不是好友，无法发送私密视频' }));
             return;
           }
-          sendToUser(ws, { type: 'private_video', url: data.url, fromUserId: userId, fromName: username }, data.targetUserId);
+          sendToUser(ws, { type: 'private_video', url: data.url, fromUserId: userId, fromName: username, msgId: data.msgId }, data.targetUserId);
+          const _u1 = Math.min(userId, Number(data.targetUserId)), _u2 = Math.max(userId, Number(data.targetUserId));
+          db.prepare('INSERT INTO private_messages (user_id_1, user_id_2, sender_id, type, content) VALUES (?, ?, ?, ?, ?)').run(_u1, _u2, userId, 'video', data.url);
+        }
+        break;
+
+      case 'private_message_recall':
+        if (data.msgId && data.targetUserId) {
+          sendToUser(ws, { type: 'private_message_recall', msgId: data.msgId, fromUserId: userId, fromName: username }, data.targetUserId);
         }
         break;
 
@@ -1432,12 +1513,12 @@ wss.on('connection', (ws) => {
         break;
 
       // ── Translation subtitles ──
-      case 'conference_subtitle':
+      case 'conference_chat':
         if (data.roomCode && data.text) {
           notifyConference(data.roomCode, {
-            type: 'conference_subtitle', fromUserId: userId, fromName: username,
-            text: data.text, translated: data.translated || '',
-          });
+            type: 'conference_chat', fromUserId: userId, fromName: username,
+            text: String(data.text).slice(0, 2000),
+          }, userId);
         }
         break;
     }
@@ -1468,11 +1549,11 @@ function broadcastUserList() {
     avatars[r.user_id] = r.avatar;
     profiles[r.user_id] = { full_name: r.full_name || '', nickname: r.nickname || '' };
   });
-  const validUserIds = new Set(db.prepare('SELECT id FROM users').all().map(r => r.id));
-  connections.forEach((u) => {
-    if (!validUserIds.has(u.userId)) return;
-    const p = profiles[u.userId] || {};
-    list.push({ id: u.userId, name: u.username, avatar: avatars[u.userId] || '', full_name: p.full_name, nickname: p.nickname });
+  // Include ALL chat users (not only currently-connected ones) so any user can
+  // find and add any other user as a friend.
+  db.prepare('SELECT id, username FROM users').all().forEach(u => {
+    const p = profiles[u.id] || {};
+    list.push({ id: u.id, name: u.username, avatar: avatars[u.id] || '', full_name: p.full_name, nickname: p.nickname });
   });
   broadcast({ type: 'users', users: list });
 }

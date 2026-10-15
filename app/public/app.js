@@ -8,6 +8,8 @@ let currentPrivatePartner = null;
 let currentGroup = null;
 let groupsInfo = {}; // groupId -> { name, memberCount? }
 const privateMessages = {};
+const unreadCounts = {}; // friendId -> unread private message count
+let newMsgToastTimer = null;
 const groupMessages = {}; // groupId -> [messages]
 let typingTimer = null;
 const TYPING_TIMEOUT = 2000;
@@ -33,15 +35,17 @@ let confRemoteStreams = new Map();
 let currentConfRoom = null;
 let confMicEnabled = true;
 let confCamEnabled = false;
-let confSubtitleEnabled = false;
+let confChatEnabled = false;
 let confTimerInterval = null;
 let confStartTime = null;
-let confRecognition = null;
 let confScreenEnabled = false;
 let _screenShareBusy = false;
 let _cameraWasOnBeforeScreen = false;
 let _confScreenLastStop = 0;
 let _pendingConfInvite = null;
+let _confAutoInviteUserId = null; // friend to auto-invite when a meeting is started from their 会议 button
+let _confRemoteSharing = null;   // userId of the remote participant currently sharing their screen
+let _confScreenStream = null;    // the local getDisplayMedia stream for screen sharing
 
 // Friend & admin state
 let friendIds = [];          // array of userIds
@@ -61,6 +65,7 @@ const inputArea = $('#input-area');
 const messagesEl = $('#messages');
 const userListEl = $('#user-list');
 const userCountEl = $('#user-count');
+const userSearch = $('#user-search');
 const typingIndicator = $('#typing-indicator');
 const myNameEl = $('#my-name');
 const logoutBtn = $('#logout-btn');
@@ -71,6 +76,7 @@ const lightbox = $('#lightbox');
 const lightboxImg = lightbox?.querySelector('img');
 const privateBar = $('#private-bar');
 const privateName = $('#private-name');
+const deleteFriendBtn = $('#delete-friend-btn');
 const backToPublic = $('#back-to-public');
 const adminPanel = $('#admin-panel');
 const adminToggle = $('#admin-toggle');
@@ -162,16 +168,15 @@ const confTimer = $('#conf-timer');
 const confMicBtn = $('#conf-mic-btn');
 const confCamBtn = $('#conf-cam-btn');
 const confScreenBtn = $('#conf-screen-btn');
-const confSubtitleBtn = $('#conf-subtitle-btn');
 const confParticipantsBtn = $('#conf-participants-btn');
 const confInviteBtn = $('#conf-invite-btn');
 const confHostBtn = $('#conf-host-btn');
 const confLeaveBtn = $('#conf-leave-btn');
-const confSubtitleArea = $('#conf-subtitle-area');
-const confSubtitleText = $('#conf-subtitle-text');
-const confParticipantsPanel = $('#conf-participants-panel');
-const confClosePanel = $('#conf-close-panel');
-const confParticipantList = $('#conf-participant-list');
+const confChatArea = $('#conf-chat-area');
+const confChatMessages = $('#conf-chat-messages');
+const confChatInput = $('#conf-chat-input');
+const confChatSend = $('#conf-chat-send');
+const confChatParticipantList = $('#conf-chat-participant-list');
 const confInviteFriends = $('#conf-invite-friends');
 const confInviteFriendList = $('#conf-invite-friend-list');
 const confInvite = $('#conf-invite');
@@ -288,6 +293,8 @@ function onAuthSuccess(newToken, name, role) {
   myNameEl.innerHTML = name + (role === 'admin' ? '<span class="admin-badge">管理员</span>' : '');
   if (role === 'admin') adminPanel.classList.remove('hidden');
   msgInput.focus();
+  // Ask for notification permission so new-message bubbles can be shown.
+  try { if (window.Notification && Notification.permission === 'default') Notification.requestPermission(); } catch {}
   connectWebSocket();
 }
 
@@ -441,7 +448,7 @@ if (!soundEnabled) soundToggle.classList.add('muted');
 soundToggle.addEventListener('click', () => {
   soundEnabled = !soundEnabled;
   soundToggle.classList.toggle('muted', !soundEnabled);
-  soundToggle.textContent = soundEnabled ? '🔔' : '🔕';
+  soundToggle.innerHTML = soundEnabled ? '<svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>' : '🔕';
   localStorage.setItem('chat_sound', soundEnabled ? 'on' : 'off');
 });
 
@@ -487,9 +494,9 @@ confLeaveBtn.addEventListener('click', leaveConference);
 confMicBtn.addEventListener('click', toggleConfMic);
 confCamBtn.addEventListener('click', toggleConfCam);
 confScreenBtn.addEventListener('click', toggleConfScreen);
-confSubtitleBtn.addEventListener('click', toggleConfSubtitle);
-confParticipantsBtn.addEventListener('click', () => confParticipantsPanel.classList.toggle('hidden'));
-confClosePanel.addEventListener('click', () => confParticipantsPanel.classList.add('hidden'));
+confChatSend.addEventListener('click', sendConfChat);
+confChatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendConfChat(); });
+confParticipantsBtn.addEventListener('click', toggleConfChat);
 confInviteBtn.addEventListener('click', openConfInvite);
 confAcceptBtn.addEventListener('click', acceptConfInvite);
 confDeclineBtn.addEventListener('click', declineConfInvite);
@@ -612,8 +619,61 @@ function enterPrivateChat(userId, name) {
   currentPrivatePartner = { id: userId, name };
   privateName.textContent = name;
   privateBar.classList.remove('hidden');
+  deleteFriendBtn.onclick = (e) => { e.stopPropagation(); deleteFriend(userId, name); };
+  // Clear this friend's unread badge.
+  if (unreadCounts[userId]) { delete unreadCounts[userId]; updateUnreadBadge(userId, 0); }
+  stopTitleFlash();
   renderCurrentView();
   updateUserListSelection(userId);
+  loadPrivateHistory(userId);
+}
+
+// Load persisted private-message history between me and a partner.
+async function loadPrivateHistory(userId) {
+  const key = getPrivateKey(userId);
+  try {
+    const data = await api('GET', `/api/messages/${userId}`);
+    const history = (data.messages || []).map(m => {
+      const type = m.type === 'image' ? 'private_image' : m.type === 'video' ? 'private_video' : 'private_message';
+      const base = {
+        msgId: 'pm_' + m.id,
+        created_at: m.created_at,
+        fromUserId: m.sender_id,
+        fromName: m.sender_name || getDisplayName(m.sender_id),
+        isPrivate: true,
+        type,
+      };
+      if (type === 'private_message') base.text = m.content;
+      else base.url = m.content;
+      return base;
+    });
+    const existing = privateMessages[key] || [];
+    if (existing.length === 0) {
+      privateMessages[key] = history;
+    } else {
+      const existingSigs = new Set(existing.map(m => `${m.fromUserId}|${m.type}|${m.text || m.url || ''}`));
+      const missing = history.filter(h => !existingSigs.has(`${h.fromUserId}|${h.type}|${h.text || h.url || ''}`));
+      privateMessages[key] = missing.concat(existing);
+    }
+    privateMessages[key].sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
+    if (currentPrivatePartner && currentPrivatePartner.id === userId) renderCurrentView();
+  } catch { /* history load is best-effort */ }
+}
+
+async function deleteFriend(userId, name) {
+  if (!confirm(`确定删除好友 ${name || ''}？此操作会清空你们在本地的聊天记录。`)) return;
+  try {
+    await api('POST', '/api/friends/remove', { userId });
+    // Clear this friend's local message cache + current chat view (local only)
+    const key = getPrivateKey(userId);
+    delete privateMessages[key];
+    if (currentPrivatePartner && currentPrivatePartner.id === userId) messagesEl.innerHTML = '';
+    renderSystem('已删除好友');
+    if (typeof fetchFriendStatuses === 'function') fetchFriendStatuses();
+    leavePrivateChat();
+  } catch (err) {
+    renderSystem(err.error || '删除失败');
+  }
 }
 
 function leavePrivateChat() {
@@ -638,7 +698,86 @@ function storePrivateMessage(data) {
   if (!partnerId) return;
   const key = getPrivateKey(partnerId);
   if (!privateMessages[key]) privateMessages[key] = [];
-  privateMessages[key].push({ ...data, isPrivate: true });
+  const msg = { ...data, isPrivate: true };
+  if (!msg.msgId) msg.msgId = 'pm_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+  if (!msg.created_at) msg.created_at = new Date().toISOString();
+  privateMessages[key].push(msg);
+}
+
+// ── Unread message badges / new-message toast ──
+function updateUnreadBadge(userId, count) {
+  const li = userListEl.querySelector(`li[data-user-id="${userId}"]`);
+  if (!li) return;
+  let wrap = li.querySelector('.user-avatar-wrap');
+  if (!wrap) wrap = li;
+  let badge = wrap.querySelector('.unread-badge');
+  if (count > 0) {
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'unread-badge';
+      wrap.appendChild(badge);
+    }
+    badge.textContent = count > 99 ? '99+' : count;
+    badge.style.display = 'flex';
+  } else if (badge) {
+    badge.remove();
+  }
+}
+function showNewMsgToast(text) {
+  let toast = document.getElementById('chat-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'chat-toast';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = text;
+  toast.classList.add('show');
+  clearTimeout(newMsgToastTimer);
+  newMsgToastTimer = setTimeout(() => toast.classList.remove('show'), 3200);
+}
+
+// Flash the tab title to get attention (taskbar/tab icon effect).
+let titleTimer = null, titleFlashOn = false;
+function startTitleFlash() {
+  const base = '企业里的同事圈';
+  titleFlashOn = false;
+  clearInterval(titleTimer);
+  titleTimer = setInterval(() => {
+    titleFlashOn = !titleFlashOn;
+    document.title = titleFlashOn ? '🔴 新消息' : base;
+  }, 1000);
+}
+function stopTitleFlash() {
+  clearInterval(titleTimer);
+  titleTimer = null;
+  document.title = '企业里的同事圈';
+}
+// Native browser notification (floating bubble) — requires permission.
+function showSystemNotification(title, body) {
+  try {
+    if (!window.Notification) return;
+    if (Notification.permission === 'granted') {
+      new Notification(title, { body });
+    } else if (Notification.permission === 'default') {
+      Notification.requestPermission().then(p => { if (p === 'granted') new Notification(title, { body }); });
+    }
+  } catch { /* ignore */ }
+}
+// Stop tab-title flashing when the window regains focus.
+window.addEventListener('focus', stopTitleFlash);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) stopTitleFlash(); });
+// Called when a private message arrives from a friend. Always shows a float
+// notification; the unread badge only accumulates when we're NOT viewing that chat.
+function notifyNewPrivateMsg(data) {
+  const friendId = Number(data.fromUserId);
+  if (!friendId) return;
+  const text = `${data.fromName || '好友'} 发来新消息`;
+  showNewMsgToast(text);          // in-page toast
+  startTitleFlash();              // tab/taskbar icon flash
+  showSystemNotification('企业里的同事圈', text);  // native floating bubble
+  if (currentPrivatePartner && Number(currentPrivatePartner.id) === friendId) return; // already reading it
+  unreadCounts[friendId] = (unreadCounts[friendId] || 0) + 1;
+  updateUnreadBadge(friendId, unreadCounts[friendId]);
 }
 
 // ── Group functions ──
@@ -662,7 +801,7 @@ function renderGroupList(groups) {
 
     const icon = document.createElement('span');
     icon.className = 'group-icon';
-    icon.textContent = '💬';
+    icon.innerHTML = '<svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7A8.38 8.38 0 0 1 4 11.5 8.5 8.5 0 0 1 12.5 3 8.5 8.5 0 0 1 21 11.5Z"/></svg>';
     li.appendChild(icon);
 
     const nameSpan = document.createElement('span');
@@ -759,9 +898,19 @@ function updateGroupListSelection(groupId) {
 async function loadGroupMessages(groupId) {
   try {
     const data = await api('GET', `/api/groups/${groupId}/messages`);
-    groupMessages[groupId] = (data.messages || []).map(m => ({
-      ...m, type: m.type === 'image' ? 'group_image' : m.type === 'video' ? 'group_video' : 'group_message',
-    }));
+    groupMessages[groupId] = (data.messages || []).map(m => {
+      const isImage = m.type === 'image' || m.type === 'group_image';
+      const isVideo = m.type === 'video' || m.type === 'group_video';
+      return {
+        ...m,
+        // Server returns user_id/user_name; chat renderers expect userId/name.
+        userId: m.user_id ?? m.userId,
+        name: m.user_name ?? m.name ?? m.username ?? '',
+        // For image/video, the URL is stored in `content`.
+        url: m.url ?? m.content,
+        type: isImage ? 'group_image' : isVideo ? 'group_video' : 'group_message',
+      };
+    });
     if (currentGroup && currentGroup.id == groupId) renderCurrentView();
   } catch {}
 }
@@ -774,10 +923,11 @@ createGroupBtn.addEventListener('click', async () => {
   // Populate friend list
   cgFriendList.innerHTML = '';
   friendIds.forEach(fid => {
-    const name = (window._userNames && window._userNames[fid]) || '用户' + fid;
+    const displayN = getDisplayName(fid);
+    const name = displayN !== '未知' ? displayN : ((window._userNames && window._userNames[fid]) || '用户' + fid);
     const item = document.createElement('div');
     item.className = 'friend-select-item';
-    item.innerHTML = `<input type="checkbox" data-userid="${fid}"><span>${name}</span>`;
+    item.innerHTML = `<span class="friend-select-avatar">${name.charAt(0).toUpperCase()}</span><span class="friend-select-name">${name}</span><input type="checkbox" data-userid="${fid}">`;
     item.querySelector('input').addEventListener('change', function () {
       item.classList.toggle('selected', this.checked);
     });
@@ -829,10 +979,11 @@ async function openInviteModal(groupId) {
   } catch {}
   friendIds.forEach(fid => {
     if (memberIds.includes(fid)) return;
-    const name = (window._userNames && window._userNames[fid]) || '用户' + fid;
+    const displayN = getDisplayName(fid);
+    const name = displayN !== '未知' ? displayN : ((window._userNames && window._userNames[fid]) || '用户' + fid);
     const item = document.createElement('div');
     item.className = 'friend-select-item';
-    item.innerHTML = `<input type="checkbox" data-userid="${fid}"><span>${name}</span>`;
+    item.innerHTML = `<span class="friend-select-avatar">${name.charAt(0).toUpperCase()}</span><span class="friend-select-name">${name}</span><input type="checkbox" data-userid="${fid}">`;
     item.querySelector('input').addEventListener('change', function () {
       item.classList.toggle('selected', this.checked);
     });
@@ -876,6 +1027,8 @@ async function leaveGroup(groupId) {
   if (!confirm('确定退出该群聊？')) return;
   try {
     await api('POST', `/api/groups/${groupId}/leave`);
+    // Clear this group's local message cache (your message box only).
+    delete groupMessages[groupId];
     if (currentGroup && currentGroup.id == groupId) leaveGroupChat();
     fetchGroups();
     renderSystem('已退出群聊');
@@ -884,7 +1037,7 @@ async function leaveGroup(groupId) {
   }
 }
 
-// ── Moments (朋友圈) ──
+// ── Moments (同事圈) ──
 let momentsPageNum = 1;
 let momentsHasMore = true;
 let momentsLoadingFlag = false;
@@ -1345,7 +1498,7 @@ function connectWebSocket() {
       // ── Private ──
       case 'private_message':
         storePrivateMessage(data);
-        if (data.fromUserId !== myUserId) playNotificationSound();
+        if (data.fromUserId !== myUserId) { playNotificationSound(); notifyNewPrivateMsg(data); }
         if (currentPrivatePartner && isPartner(currentPrivatePartner.id, data)) {
           renderPrivateMessage(data);
         } else {
@@ -1354,7 +1507,7 @@ function connectWebSocket() {
         break;
       case 'private_image':
         storePrivateMessage(data);
-        if (data.fromUserId !== myUserId) playNotificationSound();
+        if (data.fromUserId !== myUserId) { playNotificationSound(); notifyNewPrivateMsg(data); }
         if (currentPrivatePartner && isPartner(currentPrivatePartner.id, data)) {
           renderPrivateImage(data);
         } else {
@@ -1363,12 +1516,15 @@ function connectWebSocket() {
         break;
       case 'private_video':
         storePrivateMessage(data);
-        if (data.fromUserId !== myUserId) playNotificationSound();
+        if (data.fromUserId !== myUserId) { playNotificationSound(); notifyNewPrivateMsg(data); }
         if (currentPrivatePartner && isPartner(currentPrivatePartner.id, data)) {
           renderPrivateVideo(data);
         } else {
           renderSystem(`${data.fromName} 发来一条私密视频`);
         }
+        break;
+      case 'private_message_recall':
+        removePrivateMessage(data.msgId);
         break;
       case 'private_typing':
         if (currentPrivatePartner && data.fromUserId == currentPrivatePartner.id) {
@@ -1389,10 +1545,10 @@ function connectWebSocket() {
         window._pendingCallMode = data.mode;
         incomingCallerName.textContent = data.fromName;
         if (data.mode === 'video') {
-          incomingCallIcon.textContent = '📹';
+          incomingCallIcon.innerHTML = '<svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><path d="m22 8-6 4 6 4V8Z"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>';
           incomingCallMode.textContent = '视频通话...';
         } else {
-          incomingCallIcon.textContent = '📞';
+          incomingCallIcon.innerHTML = '<svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.09 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8 9.74a16 16 0 0 0 6 6l1.1-1.1a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92Z"/></svg>';
           incomingCallMode.textContent = '语音通话...';
         }
         incomingCallEl.classList.remove('hidden');
@@ -1468,6 +1624,18 @@ function connectWebSocket() {
         renderSystem(`${data.name} 已接受你的好友请求`);
         friendIds.push(data.userId);
         outgoingIds = outgoingIds.filter(id => id !== data.userId);
+        renderUserListFromState();
+        break;
+
+      case 'friend_removed':
+        renderSystem(`${data.name} 已删除好友关系`);
+        friendIds = friendIds.filter(id => id !== data.userId);
+        // Only refresh the friend list / leave the chat view. Do NOT clear the
+        // other user's local message history (对方用户的消息框内容不变).
+        if (currentPrivatePartner && currentPrivatePartner.id === data.userId) {
+          messagesEl.innerHTML = '';
+          leavePrivateChat();
+        }
         renderUserListFromState();
         break;
 
@@ -1563,7 +1731,14 @@ function connectWebSocket() {
         confRoomModal.classList.add('hidden');
         showConfOverlay();
         startConfLocalStream();
-        openConfInvite();
+        // Do NOT show the invite modal here — it covers the meeting controls.
+        // The host can invite more people with the ➕ (conf-invite-btn) button.
+        // Auto-invite the friend whose 会议 button started this meeting.
+        if (_confAutoInviteUserId && ws) {
+          const fid = _confAutoInviteUserId;
+          _confAutoInviteUserId = null;
+          ws.send(JSON.stringify({ type: 'conference_invite', roomCode: currentConfRoom.code, targetUserId: fid }));
+        }
         break;
       case 'conference_participants':
         if (!currentConfRoom) {
@@ -1619,10 +1794,9 @@ function connectWebSocket() {
           if (_pc) { _pc.close(); confPeerConnections.delete(data.userId); }
         }
         break;
-      case 'conference_subtitle':
-        if (confSubtitleEnabled && data.fromUserId !== myUserId) {
-          confSubtitleArea.classList.remove('hidden');
-          confSubtitleText.innerHTML = `<span style="color:#4fc3f7;">${data.fromName}: </span>${data.text}`;
+      case 'conference_chat':
+        if (data.fromUserId !== myUserId) {
+          addConfChat(data.fromName, data.text, false);
         }
         break;
       case 'conference_host_changed':
@@ -1640,20 +1814,32 @@ function connectWebSocket() {
         break;
       case 'conference_screen_share':
         if (data.fromUserId !== myUserId) {
-          renderSystem(data.enabled ? '对方正在共享屏幕' : '对方已停止共享屏幕');
-          // Show/hide remote shared screen in main area
+          // Show/hide remote shared screen in the CENTER (main area)
           if (data.enabled) {
-            const remoteStream = confRemoteStreams.get(data.fromUserId);
+            _confRemoteSharing = data.fromUserId;
+            // Resolve the remote stream: prefer the stored peer stream, else the
+            // remote tile's video (which already carries the shared screen).
+            let remoteStream = confRemoteStreams.get(data.fromUserId);
+            if (!remoteStream) {
+              const remoteTile = confVideoGrid.querySelector(`[data-userid="${data.fromUserId}"]`);
+              const tileVideo = remoteTile && remoteTile.querySelector('.conf-video');
+              if (tileVideo && tileVideo.srcObject) remoteStream = tileVideo.srcObject;
+            }
             if (remoteStream) {
               confMainVideo.srcObject = remoteStream;
               confMainArea.classList.add('sharing');
               confMainPlaceholder.classList.add('hidden');
+              try { confMainVideo.play(); } catch (e) { /* ignore */ }
             }
-          } else if (!confScreenEnabled) {
-            // Only clear main area if local user isn't sharing
-            confMainVideo.srcObject = null;
-            confMainArea.classList.remove('sharing');
-            confMainPlaceholder.classList.remove('hidden');
+          } else {
+            if (_confRemoteSharing === data.fromUserId) _confRemoteSharing = null;
+            if (!confScreenEnabled) {
+              // Only clear main area if local user isn't sharing
+              confMainVideo.srcObject = null;
+              confMainVideo.pause();
+              confMainArea.classList.remove('sharing');
+              confMainPlaceholder.classList.remove('hidden');
+            }
           }
           // Sync maximize state for remote user's tile
           const remoteTile = confVideoGrid.querySelector(`[data-userid="${data.fromUserId}"]`);
@@ -1704,6 +1890,14 @@ async function fetchFriendStatuses() {
     friendIds = data.friendIds || [];
     outgoingIds = data.outgoingIds || [];
     incomingReqs = data.incoming || [];
+    // Merge friend names so offline friends still display their real username
+    // instead of a generic "用户X" fallback in dialogs (e.g. group creation).
+    if (data.friendNames) {
+      window._userNames = window._userNames || {};
+      for (const id of Object.keys(data.friendNames)) {
+        window._userNames[Number(id)] = data.friendNames[id];
+      }
+    }
     renderUserListFromState();
   } catch {}
 }
@@ -1774,8 +1968,9 @@ function sendMessage() {
       leavePrivateChat();
       return;
     }
-    ws.send(JSON.stringify({ type: 'private_message', text, targetUserId: currentPrivatePartner.id }));
-    const msg = { type: 'private_message', text, fromUserId: myUserId, fromName: myUsername, isPrivate: true };
+    const mid = newMsgId();
+    ws.send(JSON.stringify({ type: 'private_message', text, targetUserId: currentPrivatePartner.id, msgId: mid }));
+    const msg = { type: 'private_message', text, fromUserId: myUserId, fromName: myUsername, isPrivate: true, msgId: mid, created_at: new Date().toISOString() };
     storePrivateMessage(msg);
     renderPrivateMessage(msg);
   }
@@ -1787,6 +1982,21 @@ function sendMessage() {
 sendBtn.addEventListener('click', sendMessage);
 msgInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+
+// ── Paste an image directly into the chat ──
+msgInput.addEventListener('paste', (e) => {
+  const items = (e.clipboardData && e.clipboardData.items) || [];
+  for (const item of items) {
+    if (item.kind === 'file' && item.type.startsWith('image/')) {
+      const file = item.getAsFile();
+      if (file) {
+        e.preventDefault();
+        uploadAndSend(file);
+        return;
+      }
+    }
+  }
 });
 
 // ── Typing ──
@@ -1839,10 +2049,13 @@ async function uploadAndSend(file) {
       const type = isVideo ? 'private_video' : 'private_image';
       const msgType = isVideo ? 'private_video' : 'private_image';
       const renderFn = isVideo ? renderPrivateVideo : renderPrivateImage;
-      ws.send(JSON.stringify({ type, url: data.url, targetUserId: currentPrivatePartner.id }));
-      const msg = { type: msgType, url: data.url, fromUserId: myUserId, fromName: myUsername, isPrivate: true };
+      const mid = newMsgId();
+      ws.send(JSON.stringify({ type, url: data.url, targetUserId: currentPrivatePartner.id, msgId: mid }));
+      const msg = { type: msgType, url: data.url, fromUserId: myUserId, fromName: myUsername, isPrivate: true, msgId: mid, created_at: new Date().toISOString() };
       storePrivateMessage(msg);
       renderFn(msg);
+    } else {
+      renderSystem('请先选择群聊或好友，再发送图片');
     }
   } catch (err) {
     hideProgress();
@@ -1924,8 +2137,10 @@ function playNotificationSound() {
 function renderPrivateMessage(data) {
   const isSelf = data.fromUserId === myUserId;
   const div = msgShell(isSelf, ' message-private');
+  if (data.msgId) div.dataset.msgid = data.msgId;
   if (!isSelf) prependNameWithAvatar(div, data.fromName, data.fromUserId);
   div.appendChild(textEl(data.text));
+  if (isSelf && canRecallPrivate(data)) div.appendChild(privateRecallBtn(data));
   div.appendChild(timeEl());
   messagesEl.appendChild(div);
   scrollDown();
@@ -1934,8 +2149,10 @@ function renderPrivateMessage(data) {
 function renderPrivateImage(data) {
   const isSelf = data.fromUserId === myUserId;
   const div = msgShell(isSelf, ' message-private');
+  if (data.msgId) div.dataset.msgid = data.msgId;
   if (!isSelf) prependNameWithAvatar(div, data.fromName, data.fromUserId);
   div.appendChild(imgEl(data.url, '私密图片'));
+  if (isSelf && canRecallPrivate(data)) div.appendChild(privateRecallBtn(data));
   div.appendChild(timeEl());
   messagesEl.appendChild(div);
   scrollDown();
@@ -1958,10 +2175,12 @@ function videoEl(src) {
 function renderPrivateVideo(data) {
   const isSelf = data.fromUserId === myUserId;
   const div = msgShell(isSelf, ' message-private');
+  if (data.msgId) div.dataset.msgid = data.msgId;
   if (!isSelf) prependNameWithAvatar(div, data.fromName, data.fromUserId);
   const v = videoEl(data.url);
   v.style.border = '2px solid #ffcc80';
   div.appendChild(v);
+  if (isSelf && canRecallPrivate(data)) div.appendChild(privateRecallBtn(data));
   div.appendChild(timeEl());
   messagesEl.appendChild(div);
   scrollDown();
@@ -1974,11 +2193,13 @@ function renderGroupMessage(data) {
   div.dataset.msgid = data.id;
   if (!isSelf) {
     const displayName = getDisplayName(data.userId);
-    prependNameWithAvatar(div, displayName || data.name, data.userId);
+    prependNameWithAvatar(div, displayName !== '未知' ? displayName : (data.name || displayName), data.userId);
   }
   div.appendChild(textEl(data.text || data.content));
-  if (myRole === 'admin' && data.userId !== myUserId) {
-    div.appendChild(adminMsgDelBtn(data.id));
+  if (data.userId === myUserId && canRecall(data)) {
+    div.appendChild(groupMsgDelBtn(data.id, '撤回'));
+  } else if (myRole === 'admin' && data.userId !== myUserId) {
+    div.appendChild(groupMsgDelBtn(data.id, '删除'));
   }
   div.appendChild(timeEl());
   messagesEl.appendChild(div);
@@ -1991,11 +2212,13 @@ function renderGroupImage(data) {
   div.dataset.msgid = data.id;
   if (!isSelf) {
     const displayName = getDisplayName(data.userId);
-    prependNameWithAvatar(div, displayName || data.name, data.userId);
+    prependNameWithAvatar(div, displayName !== '未知' ? displayName : (data.name || displayName), data.userId);
   }
   div.appendChild(imgEl(data.url, '群图片'));
-  if (myRole === 'admin' && data.userId !== myUserId) {
-    div.appendChild(adminMsgDelBtn(data.id));
+  if (data.userId === myUserId && canRecall(data)) {
+    div.appendChild(groupMsgDelBtn(data.id, '撤回'));
+  } else if (myRole === 'admin' && data.userId !== myUserId) {
+    div.appendChild(groupMsgDelBtn(data.id, '删除'));
   }
   div.appendChild(timeEl());
   messagesEl.appendChild(div);
@@ -2008,11 +2231,13 @@ function renderGroupVideo(data) {
   div.dataset.msgid = data.id;
   if (!isSelf) {
     const displayName = getDisplayName(data.userId);
-    prependNameWithAvatar(div, displayName || data.name, data.userId);
+    prependNameWithAvatar(div, displayName !== '未知' ? displayName : (data.name || displayName), data.userId);
   }
   div.appendChild(videoEl(data.url));
-  if (myRole === 'admin' && data.userId !== myUserId) {
-    div.appendChild(adminMsgDelBtn(data.id));
+  if (data.userId === myUserId && canRecall(data)) {
+    div.appendChild(groupMsgDelBtn(data.id, '撤回'));
+  } else if (myRole === 'admin' && data.userId !== myUserId) {
+    div.appendChild(groupMsgDelBtn(data.id, '删除'));
   }
   div.appendChild(timeEl());
   messagesEl.appendChild(div);
@@ -2316,6 +2541,7 @@ function textEl(t) {
 }
 function imgEl(src, alt) {
   const img = document.createElement('img');
+  img.className = 'msg-media';
   img.src = src;
   img.alt = alt;
   img.loading = 'lazy';
@@ -2330,30 +2556,75 @@ function timeEl() {
 }
 
 // Admin delete button for group messages
-function adminMsgDelBtn(msgId) {
+function groupMsgDelBtn(msgId, label) {
   const btn = document.createElement('button');
   btn.className = 'admin-msg-del';
-  btn.textContent = '🗑️';
-  btn.title = '管理员删除';
+  btn.textContent = label;
+  btn.title = label === '撤回' ? '撤回此消息' : '删除此消息';
   btn.addEventListener('click', async (e) => {
     e.stopPropagation();
-    if (!confirm('确定删除此消息？')) return;
+    if (!confirm(label === '撤回' ? '确定撤回此消息？' : '确定删除此消息？')) return;
     try {
-      await api('POST', '/api/admin/delete-group-message', { messageId: msgId });
+      await api('POST', '/api/groups/delete-message', { messageId: msgId });
       const el = messagesEl.querySelector(`[data-msgid="${msgId}"]`);
       if (el) el.remove();
     } catch (err) {
-      renderSystem(err.error || '删除失败');
+      renderSystem(err.error || '操作失败');
     }
+  });
+  return btn;
+}
+/** A group message can be recalled by its sender within 2 minutes. */
+function canRecall(msg) {
+  if (!msg || !msg.created_at) return true;
+  try {
+    const created = new Date(String(msg.created_at).replace(' ', 'T') + 'Z').getTime();
+    return (Date.now() - created) < 2 * 60 * 1000;
+  } catch { return true; }
+}
+
+// ── Private message recall (within 10 minutes) ──
+function newMsgId() { return 'pm_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7); }
+function canRecallPrivate(msg) {
+  if (!msg || !msg.created_at) return true;
+  try {
+    const created = new Date(String(msg.created_at).replace(' ', 'T') + 'Z').getTime();
+    return (Date.now() - created) < 10 * 60 * 1000;
+  } catch { return true; }
+}
+function removePrivateMessage(msgId) {
+  if (!msgId) return;
+  const el = messagesEl.querySelector(`[data-msgid="${msgId}"]`);
+  if (el) el.remove();
+  Object.values(privateMessages).forEach(arr => {
+    const idx = arr.findIndex(m => m.msgId === msgId);
+    if (idx > -1) arr.splice(idx, 1);
+  });
+}
+function privateRecallBtn(data) {
+  const btn = document.createElement('button');
+  btn.className = 'admin-msg-del';
+  btn.textContent = '撤回';
+  btn.title = '撤回此消息';
+  btn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (!confirm('确定撤回此消息？')) return;
+    const targetUserId = data.targetUserId || (currentPrivatePartner && currentPrivatePartner.id);
+    if (ws && targetUserId) {
+      ws.send(JSON.stringify({ type: 'private_message_recall', msgId: data.msgId, targetUserId }));
+    }
+    removePrivateMessage(data.msgId);
+    renderSystem('已撤回');
   });
   return btn;
 }
 
 // ── User List ──
 function renderUserList(users) {
-  // Store display names and profiles keyed by id for later re-renders
-  window._userNames = {};
-  window._userProfiles = {};
+  // Merge display names and profiles keyed by id (don't reset, so offline
+  // friend names merged from /api/friends/statuses are not lost).
+  window._userNames = window._userNames || {};
+  window._userProfiles = window._userProfiles || {};
   users.forEach(u => {
     window._userNames[u.id] = u.name;
     window._userProfiles[u.id] = { avatar: u.avatar || '', full_name: u.full_name || '', nickname: u.nickname || '' };
@@ -2378,6 +2649,7 @@ function renderUserListFromState() {
   const names = window._userNames || {};
   userListEl.innerHTML = '';
   const allIds = new Set([...Object.keys(names).map(Number), ...friendIds, ...outgoingIds, ...incomingReqs.map(r => r.userId)]);
+  const q = (userSearch && userSearch.value || '').trim().toLowerCase();
 
   let count = 0;
   allIds.forEach((id) => {
@@ -2385,6 +2657,8 @@ function renderUserListFromState() {
     const name = names[id] || '未知';
     // Skip entries with unknown name that aren't in pending request context
     if (name === '未知' && !outgoingIds.includes(id) && !incomingReqs.some(r => r.userId === id)) return;
+    // Search filter: only show users whose name matches the search term.
+    if (q && String(name).toLowerCase().indexOf(q) === -1) return;
     count++;
 
     const li = document.createElement('li');
@@ -2395,18 +2669,28 @@ function renderUserListFromState() {
     li.dataset.userName = name;
     if (currentPrivatePartner && id === currentPrivatePartner.id) li.classList.add('active');
 
+    const avatarWrap = document.createElement('div');
+    avatarWrap.className = 'user-avatar-wrap';
     if (avatarUrl) {
       const img = document.createElement('img');
       img.className = 'user-avatar';
       img.src = avatarUrl;
       img.alt = '';
-      li.appendChild(img);
+      avatarWrap.appendChild(img);
     } else {
       const placeholder = document.createElement('span');
       placeholder.className = 'user-avatar-placeholder';
       placeholder.textContent = (displayName.charAt(0) || '?').toUpperCase();
-      li.appendChild(placeholder);
+      avatarWrap.appendChild(placeholder);
     }
+    const unread = unreadCounts[id] || 0;
+    if (unread > 0) {
+      const badge = document.createElement('span');
+      badge.className = 'unread-badge';
+      badge.textContent = unread > 99 ? '99+' : unread;
+      avatarWrap.appendChild(badge);
+    }
+    li.appendChild(avatarWrap);
 
     const nameSpan = document.createElement('span');
     nameSpan.className = 'uname';
@@ -2418,7 +2702,7 @@ function renderUserListFromState() {
       // Friend → show chat button, extra actions collapsed
       const chatBtn = document.createElement('button');
       chatBtn.className = 'action-btn';
-      chatBtn.textContent = '💬';
+      chatBtn.innerHTML = '<svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7A8.38 8.38 0 0 1 4 11.5 8.5 8.5 0 0 1 12.5 3 8.5 8.5 0 0 1 21 11.5Z"/></svg>';
       chatBtn.title = '聊天';
       chatBtn.addEventListener('click', (e) => { e.stopPropagation(); enterPrivateChat(id, name); });
       li.appendChild(chatBtn);
@@ -2432,33 +2716,27 @@ function renderUserListFromState() {
         e.stopPropagation();
         extrasRow.classList.toggle('show');
       });
-      li.appendChild(expandBtn);
 
       const extrasRow = document.createElement('div');
       extrasRow.className = 'user-extras';
 
       const callBtn = document.createElement('button');
       callBtn.className = 'action-btn call';
-      callBtn.textContent = '📞';
+      callBtn.innerHTML = '<svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.09 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8 9.74a16 16 0 0 0 6 6l1.1-1.1a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92Z"/></svg>';
       callBtn.title = '语音通话';
       callBtn.addEventListener('click', (e) => { e.stopPropagation(); startCall(id, name, 'audio'); });
       extrasRow.appendChild(callBtn);
 
       const videoBtn = document.createElement('button');
       videoBtn.className = 'action-btn call';
-      videoBtn.textContent = '📹';
-      videoBtn.title = '视频通话';
-      videoBtn.addEventListener('click', (e) => { e.stopPropagation(); startCall(id, name, 'video'); });
+      videoBtn.innerHTML = '<svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><path d="m22 8-6 4 6 4V8Z"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>';
+      videoBtn.title = '会议';
+      videoBtn.addEventListener('click', (e) => { e.stopPropagation(); startMeetingWith(id, name); });
       extrasRow.appendChild(videoBtn);
 
-      const momentsBtn2 = document.createElement('button');
-      momentsBtn2.className = 'action-btn moments';
-      momentsBtn2.innerHTML = '<span class="moments-circle-icon"></span>';
-      momentsBtn2.title = '朋友圈';
-      momentsBtn2.addEventListener('click', (e) => { e.stopPropagation(); openMoments(id); });
-      extrasRow.appendChild(momentsBtn2);
-
+      // Append the extra actions first, then the "···" toggle last (far right).
       li.appendChild(extrasRow);
+      li.appendChild(expandBtn);
 
       li.addEventListener('click', () => enterPrivateChat(id, name));
     } else {
@@ -2466,7 +2744,7 @@ function renderUserListFromState() {
       if (incoming) {
         // Incoming request → show accept/reject
         const acceptBtn = document.createElement('button');
-        acceptBtn.className = 'action-btn accept';
+        acceptBtn.className = 'action-btn accept text-btn';
         acceptBtn.textContent = '接受';
         acceptBtn.addEventListener('click', (e) => {
           e.stopPropagation();
@@ -2477,14 +2755,14 @@ function renderUserListFromState() {
       } else if (outgoingIds.includes(id)) {
         // Outgoing pending
         const btn = document.createElement('button');
-        btn.className = 'action-btn pending';
+        btn.className = 'action-btn pending text-btn';
         btn.textContent = '已发送';
         li.appendChild(btn);
         li.addEventListener('click', () => renderSystem(`等待对方通过好友申请`));
       } else {
         // Not friend → show add button
         const btn = document.createElement('button');
-        btn.className = 'action-btn';
+        btn.className = 'action-btn text-btn';
         btn.textContent = '加好友';
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
@@ -2499,6 +2777,9 @@ function renderUserListFromState() {
   });
 
   userCountEl.textContent = count;
+}
+if (userSearch) {
+  userSearch.addEventListener('input', renderUserListFromState);
 }
 
 // ── Lightbox ──
@@ -2579,7 +2860,7 @@ function toggleMic() {
   const t = localStream.getAudioTracks()[0];
   if (t) {
     t.enabled = !t.enabled;
-    callMicBtn.textContent = t.enabled ? '🎤' : '🔇';
+    callMicBtn.innerHTML = t.enabled ? '<svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1M12 18v4"/></svg>' : '🔇';
     callMicBtn.classList.toggle('muted', !t.enabled);
   }
 }
@@ -2589,7 +2870,7 @@ function toggleCamera() {
   let vt = localStream.getVideoTracks()[0];
   if (vt) {
     vt.enabled = !vt.enabled;
-    callCamBtn.textContent = vt.enabled ? '📹' : '🚫';
+    callCamBtn.innerHTML = vt.enabled ? '<svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><path d="m22 8-6 4 6 4V8Z"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>' : '🚫';
     callCamBtn.classList.toggle('muted', !vt.enabled);
     if (vt.enabled) {
       callAudioPlaceholder.classList.add('hidden');
@@ -2605,7 +2886,7 @@ function toggleCamera() {
           localStream.addTrack(vt);
           pc.addTrack(vt, localStream);
           callMode = 'video';
-          callCamBtn.textContent = '📹';
+          callCamBtn.innerHTML = '<svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><path d="m22 8-6 4 6 4V8Z"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>';
           callCamBtn.classList.remove('muted');
           callAudioPlaceholder.classList.add('hidden');
           ws.send(JSON.stringify({ type: 'call_toggle_video', targetUserId: callPartnerId, videoEnabled: true }));
@@ -2667,13 +2948,13 @@ async function startLocalStream() {
     }
 
     if (callMode === 'video') {
-      callCamBtn.textContent = '📹';
+      callCamBtn.innerHTML = '<svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><path d="m22 8-6 4 6 4V8Z"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>';
       callCamBtn.classList.remove('muted');
     } else {
       callCamBtn.textContent = '🚫';
       callCamBtn.classList.add('muted');
     }
-    callMicBtn.textContent = '🎤';
+    callMicBtn.innerHTML = '<svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1M12 18v4"/></svg>';
     callMicBtn.classList.remove('muted');
   } catch (e) {
     renderSystem('无法访问麦克风/摄像头');
@@ -2751,6 +3032,32 @@ function stopCallTimer() {
 // ── Conference (会议) Functions ──
 // ═══════════════════════════════════════════
 
+/**
+ * Start a meeting (conference) with a friend from their 会议 button.
+ * Creates a room and auto-invites the chosen friend; the meeting works even
+ * with no camera/microphone (join as viewer and share the screen).
+ */
+function startMeetingWith(friendId, friendName) {
+  if (!ws) return;
+  _confAutoInviteUserId = friendId;
+  ws.send(JSON.stringify({ type: 'conference_create' }));
+}
+
+/** Show a short message over the meeting overlay (errors are otherwise hidden). */
+function confToast(text) {
+  let el = document.getElementById('conf-toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'conf-toast';
+    el.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.82);color:#fff;padding:10px 18px;border-radius:8px;z-index:9999;font-size:14px;max-width:80%;text-align:center;';
+    document.body.appendChild(el);
+  }
+  el.textContent = text;
+  el.style.display = 'block';
+  clearTimeout(confToast._t);
+  confToast._t = setTimeout(() => { el.style.display = 'none'; }, 3500);
+}
+
 function showConfOverlay() {
   confOverlay.classList.remove('hidden');
   confOverlay.style.display = 'flex';
@@ -2781,14 +3088,22 @@ async function startConfLocalStream() {
   try {
     confLocalStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     addConfVideoTile(myUserId, myUsername, confLocalStream);
-    confMicBtn.textContent = '🎤';
+    confMicBtn.innerHTML = '<svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1M12 18v4"/></svg>';
     confMicBtn.classList.remove('muted');
     confCamBtn.textContent = '🚫';
     confCamBtn.classList.add('muted');
     confCamEnabled = false;
     confMicEnabled = true;
   } catch (e) {
-    renderSystem('无法访问麦克风/摄像头');
+    // No microphone/camera detected — still join the meeting as a viewer:
+    // participants can watch/hear the others and share their screen.
+    confLocalStream = null;
+    confMicBtn.textContent = '🔇';
+    confMicBtn.classList.add('muted');
+    confCamBtn.textContent = '🚫';
+    confCamBtn.classList.add('muted');
+    confMicEnabled = false;
+    confCamEnabled = false;
   }
 }
 
@@ -2887,7 +3202,7 @@ function removeConfVideoTile(userId) {
 }
 
 function renderConfParticipantList() {
-  confParticipantList.innerHTML = '';
+  confChatParticipantList.innerHTML = '';
   if (!currentConfRoom || !currentConfRoom.participants) return;
   const isHost = currentConfRoom.hostId === myUserId;
   confHostBtn.classList.toggle('hidden', !isHost);
@@ -2915,7 +3230,7 @@ function renderConfParticipantList() {
       });
       div.appendChild(transferBtn);
     }
-    confParticipantList.appendChild(div);
+    confChatParticipantList.appendChild(div);
   });
 }
 
@@ -2932,13 +3247,15 @@ function leaveConference() {
   confVideoGrid.innerHTML = '';
   stopConfTimer();
   currentConfRoom = null;
-  confSubtitleArea.classList.add('hidden');
-  confParticipantsPanel.classList.add('hidden');
+  confChatArea.classList.add('hidden');
+  confChatMessages.innerHTML = '';
+  confChatParticipantList.innerHTML = '';
   confScreenEnabled = false;
   confCamEnabled = false;
   confMicEnabled = true;
   confInviteFriends.classList.add('hidden');
-  stopConfSubtitle();
+  confChatEnabled = false;
+  _confRemoteSharing = null;
   confMainVideo.srcObject = null;
   confMainArea.classList.remove('sharing');
   confMainPlaceholder.classList.remove('hidden');
@@ -2950,7 +3267,7 @@ function toggleConfMic() {
   if (confLocalStream) {
     confLocalStream.getAudioTracks().forEach(t => t.enabled = confMicEnabled);
   }
-  confMicBtn.textContent = confMicEnabled ? '🎤' : '🔇';
+  confMicBtn.innerHTML = confMicEnabled ? '<svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1M12 18v4"/></svg>' : '🔇';
   confMicBtn.classList.toggle('muted', !confMicEnabled);
   if (currentConfRoom && ws) {
     ws.send(JSON.stringify({ type: 'conference_toggle_media', roomCode: currentConfRoom.code, mediaType: 'audio', enabled: confMicEnabled }));
@@ -2966,6 +3283,9 @@ async function toggleConfCam() {
     }
   } else {
     // Turn camera on
+    if (!confLocalStream) {
+      confLocalStream = new MediaStream();
+    }
     if (confLocalStream) {
       const existing = confLocalStream.getVideoTracks();
       if (existing.length === 0) {
@@ -3019,7 +3339,7 @@ async function toggleConfCam() {
       }
     }
   }
-  confCamBtn.textContent = confCamEnabled ? '📹' : '🚫';
+  confCamBtn.innerHTML = confCamEnabled ? '<svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><path d="m22 8-6 4 6 4V8Z"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>' : '🚫';
   confCamBtn.classList.toggle('muted', !confCamEnabled);
   if (currentConfRoom && ws) {
     ws.send(JSON.stringify({ type: 'conference_toggle_media', roomCode: currentConfRoom.code, mediaType: 'video', enabled: confCamEnabled }));
@@ -3030,7 +3350,7 @@ async function toggleConfScreen() {
   if (confScreenEnabled) {
     // ── Stop screen share ──
     confScreenEnabled = false; // Set first to prevent ended-event re-entry
-    confScreenBtn.textContent = '🖥️';
+    confScreenBtn.innerHTML = '<svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>';
     confScreenBtn.classList.remove('active');
     confMainVideo.srcObject = null;
     confMainArea.classList.remove('sharing');
@@ -3044,10 +3364,11 @@ async function toggleConfScreen() {
       if (mb) mb.textContent = '⛶';
     }
 
-    // Stop and remove screen tracks from local stream
-    if (confLocalStream) {
-      const screenTracks = confLocalStream.getVideoTracks().filter(t => t._isScreen);
-      screenTracks.forEach(t => { t.stop(); confLocalStream.removeTrack(t); });
+    // Stop the getDisplayMedia stream (screen tracks) — the camera was never
+    // removed, so nothing to restore.
+    if (_confScreenStream) {
+      _confScreenStream.getTracks().forEach(t => { try { t.stop(); } catch (e) {} });
+      _confScreenStream = null;
     }
 
     // Remove screen senders from peer connections & collect for renegotiation
@@ -3058,15 +3379,7 @@ async function toggleConfScreen() {
       if (senders.length > 0) affectedPeerIds.push(targetUserId);
     });
 
-    // Restore camera if it was on before screen share
-    if (_cameraWasOnBeforeScreen) {
-      _cameraWasOnBeforeScreen = false;
-      if (!confCamEnabled) {
-        await toggleConfCam();
-      }
-    }
-
-    // Update local video tile
+    // Update local video tile (show the camera, which was never removed)
     if (myTile) {
       const video = myTile.querySelector('.conf-video');
       if (video) {
@@ -3104,40 +3417,32 @@ async function toggleConfScreen() {
     _screenShareBusy = true;
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-        renderSystem('屏幕共享需要HTTPS连接，请通过 https:// 访问');
+        confToast('屏幕共享需要HTTPS连接，请通过 https:// 访问');
         return;
       }
       if (!confLocalStream) {
-        renderSystem('本地流未就绪，请稍后再试');
-        return;
+        // No mic/camera detected — create an empty stream so screen sharing
+        // still works (the screen tracks are added to it below).
+        confLocalStream = new MediaStream();
       }
 
       const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+      _confScreenStream = screenStream;
 
-      // Remember camera state before replacing
-      const hadVideoTrack = confLocalStream.getVideoTracks().some(t => !t._isScreen);
-      _cameraWasOnBeforeScreen = hadVideoTrack && confCamEnabled;
-
-      // Remove (don't stop) camera tracks from the stream — keep them alive
-      const cameraTracks = confLocalStream.getVideoTracks().filter(t => !t._isScreen);
-      cameraTracks.forEach(t => { t.enabled = false; confLocalStream.removeTrack(t); });
-
-      // Add screen tracks to local stream and collect affected peers
+      // Keep the camera on the local stream/tile (video window); do NOT replace
+      // it. Add the screen as a SEPARATE stream/sender so the receiver maps the
+      // shared screen to the CENTER (main area) and keeps the camera in the tile.
       const affectedPeerIds = new Set();
       screenStream.getVideoTracks().forEach(t => {
         t._isScreen = true;
-        confLocalStream.addTrack(t);
         confPeerConnections.forEach((pc, uid) => {
-          const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
-          if (sender) sender.replaceTrack(t);
-          else pc.addTrack(t, confLocalStream);
+          pc.addTrack(t, screenStream);
           affectedPeerIds.add(uid);
         });
       });
       screenStream.getAudioTracks().forEach(t => {
-        confLocalStream.addTrack(t);
         confPeerConnections.forEach((pc, uid) => {
-          pc.addTrack(t, confLocalStream);
+          pc.addTrack(t, screenStream);
           affectedPeerIds.add(uid);
         });
       });
@@ -3163,6 +3468,12 @@ async function toggleConfScreen() {
         if (mb) mb.textContent = '✕';
       }
 
+      // Let receivers know we're sharing BEFORE the renegotiation, so they can
+      // route the incoming screen track to the CENTER (main area) immediately.
+      if (ws && currentConfRoom) {
+        ws.send(JSON.stringify({ type: 'conference_screen_share', roomCode: currentConfRoom.code, enabled: true }));
+      }
+
       // Renegotiate with affected peers so they receive the screen tracks
       for (const targetUserId of affectedPeerIds) {
         const pc = confPeerConnections.get(targetUserId);
@@ -3183,12 +3494,8 @@ async function toggleConfScreen() {
       screenStream.getVideoTracks()[0].addEventListener('ended', () => {
         if (confScreenEnabled) toggleConfScreen();
       });
-
-      if (ws && currentConfRoom) {
-        ws.send(JSON.stringify({ type: 'conference_screen_share', roomCode: currentConfRoom.code, enabled: true }));
-      }
     } catch (e) {
-      renderSystem('屏幕共享启动失败: ' + (e.message || ''));
+      confToast('屏幕共享启动失败: ' + (e.message || ''));
     } finally {
       _screenShareBusy = false;
     }
@@ -3220,6 +3527,17 @@ function createConfPeerConnection(targetUserId, isOfferer) {
   pc.ontrack = (event) => {
     if (!event.streams[0]) return;
     const remoteStream = event.streams[0];
+    // If this user is sharing their screen, route the stream to the CENTER
+    // (main area) and leave the camera tile (stored earlier) untouched. This
+    // handles the race where the renegotiated screen stream lands after the
+    // conference_screen_share event.
+    if (_confRemoteSharing === targetUserId) {
+      confMainVideo.srcObject = remoteStream;
+      confMainArea.classList.add('sharing');
+      confMainPlaceholder.classList.add('hidden');
+      try { confMainVideo.play(); } catch (e) { /* ignore */ }
+      return;
+    }
     confRemoteStreams.set(targetUserId, remoteStream);
     const displayName = (window._userNames && window._userNames[targetUserId]) || '用户' + targetUserId;
     addConfVideoTile(targetUserId, displayName, remoteStream);
@@ -3293,7 +3611,8 @@ async function openConfInvite() {
   if (!currentConfRoom) return;
   confInviteFriendList.innerHTML = '';
   friendIds.forEach(fid => {
-    const name = (window._userNames && window._userNames[fid]) || '用户' + fid;
+    const displayN = getDisplayName(fid);
+    const name = displayN !== '未知' ? displayN : ((window._userNames && window._userNames[fid]) || '用户' + fid);
     const btn = document.createElement('button');
     btn.className = 'conf-invite-friend-btn';
     btn.textContent = name;
@@ -3335,81 +3654,44 @@ function declineConfInvite() {
 
 function transferHost() {
   if (!currentConfRoom || !currentConfRoom.participants) return;
-  // Show participant list for host selection
-  confParticipantsPanel.classList.remove('hidden');
+  // Show the participant list (inside the 沟通 box) for host selection.
+  confChatArea.classList.remove('hidden');
   renderConfParticipantList();
 }
 
-// ── Subtitle / Translation ──
+// ── Meeting communication (沟通 / 参与者，由「👥 参与者」按钮打开) ──
 
-function toggleConfSubtitle() {
-  confSubtitleEnabled = !confSubtitleEnabled;
-  confSubtitleBtn.classList.toggle('muted', !confSubtitleEnabled);
-  if (confSubtitleEnabled) {
-    startConfSubtitle();
-  } else {
-    stopConfSubtitle();
+function toggleConfChat() {
+  confChatEnabled = !confChatEnabled;
+  // Participant list and chat live in the SAME panel (沟通 box).
+  confChatArea.classList.toggle('hidden', !confChatEnabled);
+  if (confChatEnabled) {
+    renderConfParticipantList();
+    confChatInput.focus();
   }
 }
 
-function startConfSubtitle() {
-  confSubtitleArea.classList.remove('hidden');
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) {
-    confSubtitleText.textContent = '您的浏览器不支持语音识别';
-    return;
-  }
-  confRecognition = new SpeechRecognition();
-  confRecognition.lang = 'zh-CN';
-  confRecognition.interimResults = true;
-  confRecognition.continuous = true;
-
-  confRecognition.onresult = async (event) => {
-    let interim = '';
-    let final = '';
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      if (event.results[i].isFinal) final += event.results[i][0].transcript;
-      else interim += event.results[i][0].transcript;
-    }
-    const text = final || interim;
-    if (text) {
-      confSubtitleText.innerHTML = `<span style="color:#4fc3f7;">${text}</span>`;
-      // Translate final text
-      if (final) {
-        try {
-          const isChinese = /[一-鿿]/.test(text);
-          const targetLang = isChinese ? 'en' : 'zh-CN';
-          const res = await fetch('/api/translate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            body: JSON.stringify({ text: final, targetLang }),
-          });
-          const tData = await res.json();
-          if (tData.translated && tData.translated !== final) {
-            confSubtitleText.innerHTML = `${final}<br><span style="color:#ffcc80;font-size:14px;">${tData.translated}</span>`;
-          }
-        } catch {}
-        // Broadcast to conference
-        if (ws && currentConfRoom) {
-          ws.send(JSON.stringify({ type: 'conference_subtitle', roomCode: currentConfRoom.code, text: final }));
-        }
-      }
-    }
-  };
-
-  confRecognition.onerror = () => {
-    setTimeout(() => { if (confSubtitleEnabled) startConfSubtitle(); }, 1000);
-  };
-
-  confRecognition.start();
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-function stopConfSubtitle() {
-  if (confRecognition) {
-    try { confRecognition.stop(); } catch {}
-    confRecognition = null;
-  }
-  confSubtitleArea.classList.add('hidden');
+function addConfChat(fromName, text, isSelf) {
+  const row = document.createElement('div');
+  row.className = 'conf-chat-msg' + (isSelf ? ' self' : '');
+  const name = isSelf ? '我' : (fromName || '对方');
+  row.innerHTML = `<span class="conf-chat-sender">${escapeHtml(name)}</span><span class="conf-chat-text">${escapeHtml(text)}</span>`;
+  confChatMessages.appendChild(row);
+  confChatArea.classList.remove('hidden');
+  confChatMessages.scrollTop = confChatMessages.scrollHeight;
+}
+
+function sendConfChat() {
+  const text = confChatInput.value.trim();
+  if (!text) return;
+  if (!ws || !currentConfRoom) return;
+  ws.send(JSON.stringify({ type: 'conference_chat', roomCode: currentConfRoom.code, text: text.slice(0, 2000) }));
+  addConfChat(myUsername, text, true);
+  confChatInput.value = '';
 }
 
 // ── Helpers ──

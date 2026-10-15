@@ -3,15 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>聊聊 - 即时聊天</title>
+  <title>企业里的同事圈</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <!-- ===== Auth Overlay ===== -->
   <div id="auth-overlay" class="overlay">
     <div class="auth-box">
-      <h1>聊聊</h1>
-      <p class="subtitle">即时聊天工具</p>
+      <div class="brand-mark">企</div>
+      <h1>企业里的同事圈</h1>
+      <p class="subtitle">企业同事即时交流平台</p>
 
       <div class="tabs">
         <button class="tab active" data-tab="login">登录</button>
@@ -43,9 +44,10 @@
   <div id="chat-container" class="hidden">
     <aside id="sidebar">
       <div class="sidebar-header">
-        <h3>在线用户</h3>
+        <h3>用户</h3>
         <span id="user-count">0</span>
       </div>
+      <input id="user-search" type="text" placeholder="搜索用户名..." />
       <ul id="user-list"></ul>
 
       <!-- Group section -->
@@ -81,13 +83,13 @@
       <div class="sidebar-footer">
         <span id="my-name"></span>
         <div class="footer-actions">
-          <button id="sound-toggle" title="提示音">🔔</button>
-          <button id="profile-btn" title="个人资料">👤</button>
-          <button id="moments-btn" title="朋友圈"><span class="moments-circle-icon"></span></button>
+          <button id="sound-toggle" title="提示音"><svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></button>
+          <button id="profile-btn" title="个人资料"><svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></button>
+          <button id="moments-btn" title="同事圈"><span class="moments-circle-icon"></span></button>
           <span id="footer-more" class="footer-more">···</span>
           <div id="footer-extra" class="footer-extra hidden">
-            <button id="conf-room-btn" title="会议">📞</button>
-            <button id="change-pw-btn" title="修改密码">🔑</button>
+            <button id="conf-room-btn" title="会议"><svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.09 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8 9.74a16 16 0 0 0 6 6l1.1-1.1a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92Z"/></svg></button>
+            <button id="change-pw-btn" title="修改密码"><svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="m10.85 12.15 7.15-7.15M18 5l2 2M15 8l2 2"/></svg></button>
             <button id="logout-btn">退出</button>
           </div>
         </div>
@@ -96,27 +98,31 @@
 
     <main id="main">
       <header id="chat-header">
-        <h2>聊聊</h2>
+        <h2>企业里的同事圈</h2>
         <span id="typing-indicator" class="hidden"></span>
       </header>
 
       <div id="private-bar" class="hidden">
         <button id="back-to-public">← 返回好友动态</button>
         <span>与 <strong id="private-name"></strong> 私密聊天中</span>
+        <button id="delete-friend-btn">删除好友</button>
       </div>
 
       <div id="group-bar" class="hidden">
         <button id="back-from-group">← 返回好友动态</button>
-        <span>在群组 <strong id="group-bar-name"></strong> 中</span>
+        <div class="group-bar-title">
+          <span class="group-bar-icon"><svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+          <div class="group-bar-name" id="group-bar-name">群聊</div>
+        </div>
       </div>
 
       <div id="messages"></div>
 
       <div id="input-area">
-        <button id="screenshot-btn" title="截图" aria-label="截图">📷</button>
-        <button id="upload-btn" title="上传图片/视频" aria-label="上传图片/视频">📁</button>
+        <button id="screenshot-btn" title="截图" aria-label="截图"><svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h2l2-2h6l2 2h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><circle cx="12" cy="13" r="3.5"/></svg></button>
+        <button id="upload-btn" title="上传图片/视频" aria-label="上传图片/视频"><svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M12 17v-5m0 0-2 2m2-2 2 2"/></svg></button>
         <input type="file" id="file-input" accept="image/*,video/*" hidden>
-        <input type="text" id="msg-input" placeholder="输入消息..." maxlength="500">
+        <input type="text" id="msg-input" placeholder="输入消息，或直接粘贴图片..." maxlength="500">
         <button id="send-btn">发送</button>
       </div>
     </main>
@@ -125,12 +131,12 @@
   <!-- ===== Incoming Call Modal ===== -->
   <div id="incoming-call" class="overlay hidden" style="z-index:998;">
     <div class="auth-box" style="width:320px;text-align:center;padding:32px;">
-      <div id="incoming-call-icon" style="font-size:48px;margin-bottom:8px;">📹</div>
+      <div id="incoming-call-icon" style="font-size:48px;margin-bottom:8px;"><svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><path d="m22 8-6 4 6 4V8Z"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg></div>
       <h2 id="incoming-caller-name" style="font-size:20px;margin-bottom:4px;"></h2>
       <p id="incoming-call-mode" style="color:#999;font-size:14px;margin-bottom:20px;">视频通话...</p>
       <div style="display:flex;gap:16px;justify-content:center;">
-        <button id="call-accept-btn" style="min-width:80px;padding:10px 24px;background:#4caf50;color:#fff;border:none;border-radius:24px;font-size:15px;font-weight:600;cursor:pointer;">接受</button>
-        <button id="call-decline-btn" style="min-width:80px;padding:10px 24px;background:#e74c3c;color:#fff;border:none;border-radius:24px;font-size:15px;font-weight:600;cursor:pointer;">拒绝</button>
+        <button id="call-accept-btn" style="min-width:80px;padding:10px 24px;background:#22c55e;color:#fff;border:none;border-radius:24px;font-size:15px;font-weight:600;cursor:pointer;">接受</button>
+        <button id="call-decline-btn" style="min-width:80px;padding:10px 24px;background:#ec1313;color:#fff;border:none;border-radius:24px;font-size:15px;font-weight:600;cursor:pointer;">拒绝</button>
       </div>
     </div>
   </div>
@@ -140,7 +146,7 @@
     <div id="call-remote-container">
       <video id="remote-video" autoplay playsinline></video>
       <div id="call-audio-placeholder">
-        <div id="call-audio-icon">📞</div>
+        <div id="call-audio-icon"><svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.09 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8 9.74a16 16 0 0 0 6 6l1.1-1.1a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92Z"/></svg></div>
         <div id="call-audio-name"></div>
       </div>
     </div>
@@ -150,9 +156,9 @@
     <div id="call-timer">00:00</div>
     <div id="call-status" class="hidden"></div>
     <div id="call-controls">
-      <button id="call-mic-btn" class="call-ctrl-btn" title="麦克风">🎤</button>
-      <button id="call-cam-btn" class="call-ctrl-btn" title="摄像头">📹</button>
-      <button id="call-hangup-btn" class="call-ctrl-btn call-hangup" title="挂断">📞</button>
+      <button id="call-mic-btn" class="call-ctrl-btn" title="麦克风"><svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1M12 18v4"/></svg></button>
+      <button id="call-cam-btn" class="call-ctrl-btn" title="摄像头"><svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><path d="m22 8-6 4 6 4V8Z"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg></button>
+      <button id="call-hangup-btn" class="call-ctrl-btn call-hangup" title="挂断"><svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.09 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8 9.74a16 16 0 0 0 6 6l1.1-1.1a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92Z"/></svg></button>
     </div>
   </div>
 
@@ -219,7 +225,7 @@
       <div class="friend-select" style="margin-top:12px;">
         <div id="ig-friend-list" class="friend-select-list"></div>
       </div>
-      <button id="invite-group-btn" style="display:block;width:100%;padding:10px;margin-top:12px;background:#667eea;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;">邀请</button>
+      <button id="invite-group-btn" style="display:block;width:100%;padding:10px;margin-top:12px;background:#4176e6;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;">邀请</button>
       <p id="invite-group-error" class="auth-error"></p>
       <button id="invite-group-cancel" style="display:block;margin:8px auto 0;background:none;border:none;color:#999;font-size:13px;cursor:pointer;">关闭</button>
     </div>
@@ -228,51 +234,49 @@
   <!-- ===== Conference Invite Notification ===== -->
   <div id="conf-invite" class="overlay hidden" style="z-index:998;">
     <div class="auth-box" style="width:320px;text-align:center;padding:32px;">
-      <div style="font-size:48px;margin-bottom:8px;">📹</div>
+      <div style="font-size:48px;margin-bottom:8px;"><svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><path d="m22 8-6 4 6 4V8Z"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg></div>
       <h2 id="conf-invite-title" style="font-size:20px;margin-bottom:4px;"></h2>
       <p id="conf-invite-desc" style="color:#999;font-size:14px;margin-bottom:20px;">邀请您加入会议</p>
       <div style="display:flex;gap:16px;justify-content:center;">
-        <button id="conf-accept-btn" style="min-width:80px;padding:10px 24px;background:#4caf50;color:#fff;border:none;border-radius:24px;font-size:15px;font-weight:600;cursor:pointer;">加入</button>
-        <button id="conf-decline-btn" style="min-width:80px;padding:10px 24px;background:#e74c3c;color:#fff;border:none;border-radius:24px;font-size:15px;font-weight:600;cursor:pointer;">忽略</button>
+        <button id="conf-accept-btn" style="min-width:80px;padding:10px 24px;background:#22c55e;color:#fff;border:none;border-radius:24px;font-size:15px;font-weight:600;cursor:pointer;">加入</button>
+        <button id="conf-decline-btn" style="min-width:80px;padding:10px 24px;background:#ec1313;color:#fff;border:none;border-radius:24px;font-size:15px;font-weight:600;cursor:pointer;">忽略</button>
       </div>
     </div>
   </div>
 
   <!-- ===== Conference Overlay ===== -->
   <div id="conf-overlay" class="hidden">
+    <div id="conf-video-sidebar"><div id="conf-video-grid"></div></div>
     <div id="conf-body">
       <div id="conf-main-area">
         <video id="conf-main-video" autoplay playsinline></video>
         <div id="conf-main-placeholder">
-          <div id="conf-main-placeholder-icon">📹</div>
+          <div id="conf-main-placeholder-icon"><svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><path d="m22 8-6 4 6 4V8Z"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg></div>
           <div id="conf-main-placeholder-text">会议进行中...</div>
         </div>
       </div>
-      <div id="conf-video-sidebar">
-        <div id="conf-video-grid"></div>
-      </div>
     </div>
-    <div id="conf-subtitle-area" class="hidden">
-      <div id="conf-subtitle-text"></div>
-    </div>
-    <div id="conf-participants-panel" class="hidden">
-      <div id="conf-participants-header">
-        <span>参与者</span>
-        <button id="conf-close-panel">×</button>
+    <div id="conf-chat-area" class="hidden">
+      <div id="conf-chat-participants">
+        <div id="conf-chat-participants-title">参与者</div>
+        <div id="conf-chat-participant-list"></div>
       </div>
-      <div id="conf-participant-list"></div>
+      <div id="conf-chat-messages"></div>
+      <div id="conf-chat-input-row">
+        <input id="conf-chat-input" type="text" placeholder="发送消息给会议成员..." />
+        <button id="conf-chat-send">发送</button>
+      </div>
     </div>
     <div id="conf-timer">00:00</div>
     <div id="conf-controls">
-      <button id="conf-mic-btn" class="call-ctrl-btn" title="麦克风">🎤</button>
-      <button id="conf-cam-btn" class="call-ctrl-btn" title="摄像头">📹</button>
-      <button id="conf-screen-btn" class="call-ctrl-btn" title="共享屏幕">🖥️</button>
-      <button id="conf-subtitle-btn" class="call-ctrl-btn" title="字幕/翻译">💬</button>
-      <button id="conf-participants-btn" class="call-ctrl-btn" title="参与者">👥</button>
-      <button id="conf-invite-btn" class="call-ctrl-btn" title="邀请">➕</button>
-      <button id="conf-host-btn" class="call-ctrl-btn hidden" title="转移主持人">👑</button>
-      <button id="conf-end-btn" class="call-ctrl-btn hidden" title="结束会议" style="color:#e74c3c;">⏹</button>
-      <button id="conf-leave-btn" class="call-ctrl-btn conf-hangup" title="离开会议">📞</button>
+      <button id="conf-mic-btn" class="call-ctrl-btn" title="麦克风"><svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1M12 18v4"/></svg></button>
+      <button id="conf-cam-btn" class="call-ctrl-btn" title="摄像头"><svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><path d="m22 8-6 4 6 4V8Z"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg></button>
+      <button id="conf-screen-btn" class="call-ctrl-btn" title="共享屏幕"><svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></button>
+      <button id="conf-participants-btn" class="call-ctrl-btn" title="参与者 / 沟通"><svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></button>
+      <button id="conf-invite-btn" class="call-ctrl-btn" title="邀请"><svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+      <button id="conf-host-btn" class="call-ctrl-btn hidden" title="转移主持人"><svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l-1-12 5 4 5-6 5 6 5-4-1 12Z"/></svg></button>
+      <button id="conf-end-btn" class="call-ctrl-btn hidden" title="结束会议" style="color:#ec1313;"><svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button>
+      <button id="conf-leave-btn" class="call-ctrl-btn conf-hangup" title="离开会议"><svg class="ticon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.09 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8 9.74a16 16 0 0 0 6 6l1.1-1.1a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92Z"/></svg></button>
     </div>
   </div>
 
@@ -281,16 +285,16 @@
     <div class="auth-box" style="width:360px;">
       <h1 style="font-size:20px;text-align:center;">会议</h1>
       <div style="display:flex;gap:8px;margin-top:16px;">
-        <button id="conf-create-btn" style="flex:1;padding:12px;background:#667eea;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;">创建会议</button>
+        <button id="conf-create-btn" style="flex:1;padding:12px;background:#4176e6;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;">创建会议</button>
       </div>
       <div style="display:flex;gap:8px;margin-top:10px;align-items:center;">
-        <input type="text" id="conf-join-input" placeholder="输入会议码加入" style="flex:1;padding:10px 14px;border:2px solid #e0e0e0;border-radius:10px;font-size:14px;outline:none;">
-        <button id="conf-join-btn" style="padding:10px 16px;background:#4caf50;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;">加入</button>
+        <input type="text" id="conf-join-input" placeholder="输入会议码加入" style="flex:1;padding:10px 14px;border:2px solid #e5e7eb;border-radius:10px;font-size:14px;outline:none;">
+        <button id="conf-join-btn" style="padding:10px 16px;background:#22c55e;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;">加入</button>
       </div>
       <p id="conf-room-error" class="auth-error" style="margin-top:8px;"></p>
       <button id="conf-room-close" style="display:block;margin:12px auto 0;background:none;border:none;color:#999;font-size:13px;cursor:pointer;">关闭</button>
       <!-- Invite friend list (shown after room created) -->
-      <div id="conf-invite-friends" class="hidden" style="margin-top:12px;border-top:1px solid #e0e0e0;padding-top:12px;">
+      <div id="conf-invite-friends" class="hidden" style="margin-top:12px;border-top:1px solid #e5e7eb;padding-top:12px;">
         <p style="font-size:13px;color:#888;margin-bottom:6px;">邀请好友：</p>
         <div id="conf-invite-friend-list" style="max-height:150px;overflow-y:auto;"></div>
       </div>
@@ -298,10 +302,10 @@
   </div>
 
   <!-- ===== Moments Page ===== -->
-  <div id="moments-page" class="hidden" style="position:fixed;inset:0;z-index:990;background:#f5f5f5;display:none;flex-direction:column;">
-    <div id="moments-header" style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px;background:#fff;border-bottom:1px solid #e0e0e0;">
+  <div id="moments-page" class="hidden" style="position:fixed;inset:0;z-index:990;background:var(--t-bg-module);flex-direction:column;">
+    <div id="moments-header" style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px;background:#fff;border-bottom:1px solid #e5e7eb;">
       <button id="moments-back" style="padding:4px 12px;background:none;border:1px solid #ddd;border-radius:6px;font-size:13px;color:#666;cursor:pointer;">返回</button>
-      <h2 style="font-size:18px;font-weight:600;color:#333;">朋友圈</h2>
+      <h2 style="font-size:18px;font-weight:600;color:#333;">同事圈</h2>
       <span style="width:52px;"></span>
     </div>
     <div id="moments-input-area">
@@ -328,18 +332,18 @@
   <div id="create-moment-modal" class="overlay hidden" style="z-index:999;">
     <div class="auth-box" style="width:420px;max-height:90vh;overflow-y:auto;">
       <h1 style="font-size:18px;text-align:center;margin-bottom:12px;">发表动态</h1>
-      <textarea id="mm-content" placeholder="说说你的心情..." style="width:100%;min-height:80px;padding:10px 14px;border:2px solid #e0e0e0;border-radius:10px;font-size:14px;outline:none;resize:none;font-family:inherit;" maxlength="2000"></textarea>
+      <textarea id="mm-content" placeholder="说说你的心情..." style="width:100%;min-height:80px;padding:10px 14px;border:2px solid #e5e7eb;border-radius:10px;font-size:14px;outline:none;resize:none;font-family:inherit;" maxlength="2000"></textarea>
       <div id="mm-image-preview" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;"></div>
       <div style="display:flex;gap:8px;margin-top:8px;">
         <button id="mm-add-image-btn" style="padding:6px 14px;background:#f0f2f5;border:1px solid #ddd;border-radius:8px;font-size:13px;cursor:pointer;">📷 添加图片</button>
         <input type="file" id="mm-image-input" accept="image/*" multiple hidden>
       </div>
-      <input type="text" id="mm-link-url" placeholder="链接 URL" style="width:100%;padding:8px 12px;border:2px solid #e0e0e0;border-radius:8px;font-size:13px;outline:none;margin-top:8px;">
-      <input type="text" id="mm-link-title" placeholder="链接标题" style="width:100%;padding:8px 12px;border:2px solid #e0e0e0;border-radius:8px;font-size:13px;outline:none;margin-top:6px;">
-      <input type="text" id="mm-music-url" placeholder="音乐 URL" style="width:100%;padding:8px 12px;border:2px solid #e0e0e0;border-radius:8px;font-size:13px;outline:none;margin-top:6px;">
-      <input type="text" id="mm-video-url" placeholder="视频 URL" style="width:100%;padding:8px 12px;border:2px solid #e0e0e0;border-radius:8px;font-size:13px;outline:none;margin-top:6px;">
+      <input type="text" id="mm-link-url" placeholder="链接 URL" style="width:100%;padding:8px 12px;border:2px solid #e5e7eb;border-radius:8px;font-size:13px;outline:none;margin-top:8px;">
+      <input type="text" id="mm-link-title" placeholder="链接标题" style="width:100%;padding:8px 12px;border:2px solid #e5e7eb;border-radius:8px;font-size:13px;outline:none;margin-top:6px;">
+      <input type="text" id="mm-music-url" placeholder="音乐 URL" style="width:100%;padding:8px 12px;border:2px solid #e5e7eb;border-radius:8px;font-size:13px;outline:none;margin-top:6px;">
+      <input type="text" id="mm-video-url" placeholder="视频 URL" style="width:100%;padding:8px 12px;border:2px solid #e5e7eb;border-radius:8px;font-size:13px;outline:none;margin-top:6px;">
       <p id="mm-error" class="auth-error" style="margin-top:8px;"></p>
-      <button id="mm-submit" style="display:block;width:100%;padding:10px;margin-top:10px;background:#667eea;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;">发表</button>
+      <button id="mm-submit" style="display:block;width:100%;padding:10px;margin-top:10px;background:#4176e6;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;">发表</button>
       <button id="mm-cancel" style="display:block;margin:8px auto 0;background:none;border:none;color:#999;font-size:13px;cursor:pointer;">取消</button>
     </div>
   </div>
