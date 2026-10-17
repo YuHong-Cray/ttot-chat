@@ -7,6 +7,48 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <script>
+    // Follow the stp-harness theme (body[data-ds-dark-theme]) when embedded,
+    // otherwise fall back to the OS color-scheme.
+    (function () {
+      function setDark(dark) {
+        if (dark) document.body.setAttribute('data-ds-dark-theme', '');
+        else document.body.removeAttribute('data-ds-dark-theme');
+      }
+      function systemDark() {
+        return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      }
+      function detect() {
+        // 1) Explicit ?theme=dark|light from the DSH plugin button (highest priority).
+        try {
+          var t = new URLSearchParams(location.search).get('theme');
+          if (t === 'dark') { setDark(true); return; }
+          if (t === 'light') { setDark(false); return; }
+        } catch (e) {}
+        // 2) Parent page (same-origin /ttot/ embed) carries stp-harness theme.
+        var dark = false;
+        try {
+          if (window.parent && window.parent !== window &&
+              window.parent.document && window.parent.document.body &&
+              window.parent.document.body.hasAttribute('data-ds-dark-theme')) {
+            dark = true;
+          } else {
+            dark = systemDark();
+          }
+        } catch (e) { dark = systemDark(); }
+        setDark(dark);
+      }
+      detect();
+      try {
+        if (window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', detect);
+      } catch (e) {}
+      try {
+        if (window.parent && window.parent !== window && window.parent.document && window.parent.document.body) {
+          new MutationObserver(detect).observe(window.parent.document.body, { attributes: true, attributeFilter: ['data-ds-dark-theme'] });
+        }
+      } catch (e) {}
+    })();
+  </script>
   <!-- ===== Auth Overlay ===== -->
   <div id="auth-overlay" class="overlay">
     <div class="auth-box">
@@ -288,13 +330,13 @@
         <button id="conf-create-btn" style="flex:1;padding:12px;background:#4176e6;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;">创建会议</button>
       </div>
       <div style="display:flex;gap:8px;margin-top:10px;align-items:center;">
-        <input type="text" id="conf-join-input" placeholder="输入会议码加入" style="flex:1;padding:10px 14px;border:2px solid #e5e7eb;border-radius:10px;font-size:14px;outline:none;">
+        <input type="text" id="conf-join-input" placeholder="输入会议码加入" style="flex:1;padding:10px 14px;border:2px solid var(--t-border);border-radius:10px;font-size:14px;outline:none;">
         <button id="conf-join-btn" style="padding:10px 16px;background:#22c55e;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;">加入</button>
       </div>
       <p id="conf-room-error" class="auth-error" style="margin-top:8px;"></p>
       <button id="conf-room-close" style="display:block;margin:12px auto 0;background:none;border:none;color:#999;font-size:13px;cursor:pointer;">关闭</button>
       <!-- Invite friend list (shown after room created) -->
-      <div id="conf-invite-friends" class="hidden" style="margin-top:12px;border-top:1px solid #e5e7eb;padding-top:12px;">
+      <div id="conf-invite-friends" class="hidden" style="margin-top:12px;border-top:1px solid var(--t-border);padding-top:12px;">
         <p style="font-size:13px;color:#888;margin-bottom:6px;">邀请好友：</p>
         <div id="conf-invite-friend-list" style="max-height:150px;overflow-y:auto;"></div>
       </div>
@@ -303,7 +345,7 @@
 
   <!-- ===== Moments Page ===== -->
   <div id="moments-page" class="hidden" style="position:fixed;inset:0;z-index:990;background:var(--t-bg-module);flex-direction:column;">
-    <div id="moments-header" style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px;background:#fff;border-bottom:1px solid #e5e7eb;">
+    <div id="moments-header" style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px;background:var(--t-surface);border-bottom:1px solid var(--t-border);">
       <button id="moments-back" style="padding:4px 12px;background:none;border:1px solid #ddd;border-radius:6px;font-size:13px;color:#666;cursor:pointer;">返回</button>
       <h2 style="font-size:18px;font-weight:600;color:#333;">同事圈</h2>
       <span style="width:52px;"></span>
@@ -332,16 +374,16 @@
   <div id="create-moment-modal" class="overlay hidden" style="z-index:999;">
     <div class="auth-box" style="width:420px;max-height:90vh;overflow-y:auto;">
       <h1 style="font-size:18px;text-align:center;margin-bottom:12px;">发表动态</h1>
-      <textarea id="mm-content" placeholder="说说你的心情..." style="width:100%;min-height:80px;padding:10px 14px;border:2px solid #e5e7eb;border-radius:10px;font-size:14px;outline:none;resize:none;font-family:inherit;" maxlength="2000"></textarea>
+      <textarea id="mm-content" placeholder="说说你的心情..." style="width:100%;min-height:80px;padding:10px 14px;border:2px solid var(--t-border);border-radius:10px;font-size:14px;outline:none;resize:none;font-family:inherit;" maxlength="2000"></textarea>
       <div id="mm-image-preview" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;"></div>
       <div style="display:flex;gap:8px;margin-top:8px;">
         <button id="mm-add-image-btn" style="padding:6px 14px;background:#f0f2f5;border:1px solid #ddd;border-radius:8px;font-size:13px;cursor:pointer;">📷 添加图片</button>
         <input type="file" id="mm-image-input" accept="image/*" multiple hidden>
       </div>
-      <input type="text" id="mm-link-url" placeholder="链接 URL" style="width:100%;padding:8px 12px;border:2px solid #e5e7eb;border-radius:8px;font-size:13px;outline:none;margin-top:8px;">
-      <input type="text" id="mm-link-title" placeholder="链接标题" style="width:100%;padding:8px 12px;border:2px solid #e5e7eb;border-radius:8px;font-size:13px;outline:none;margin-top:6px;">
-      <input type="text" id="mm-music-url" placeholder="音乐 URL" style="width:100%;padding:8px 12px;border:2px solid #e5e7eb;border-radius:8px;font-size:13px;outline:none;margin-top:6px;">
-      <input type="text" id="mm-video-url" placeholder="视频 URL" style="width:100%;padding:8px 12px;border:2px solid #e5e7eb;border-radius:8px;font-size:13px;outline:none;margin-top:6px;">
+      <input type="text" id="mm-link-url" placeholder="链接 URL" style="width:100%;padding:8px 12px;border:2px solid var(--t-border);border-radius:8px;font-size:13px;outline:none;margin-top:8px;">
+      <input type="text" id="mm-link-title" placeholder="链接标题" style="width:100%;padding:8px 12px;border:2px solid var(--t-border);border-radius:8px;font-size:13px;outline:none;margin-top:6px;">
+      <input type="text" id="mm-music-url" placeholder="音乐 URL" style="width:100%;padding:8px 12px;border:2px solid var(--t-border);border-radius:8px;font-size:13px;outline:none;margin-top:6px;">
+      <input type="text" id="mm-video-url" placeholder="视频 URL" style="width:100%;padding:8px 12px;border:2px solid var(--t-border);border-radius:8px;font-size:13px;outline:none;margin-top:6px;">
       <p id="mm-error" class="auth-error" style="margin-top:8px;"></p>
       <button id="mm-submit" style="display:block;width:100%;padding:10px;margin-top:10px;background:#4176e6;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;">发表</button>
       <button id="mm-cancel" style="display:block;margin:8px auto 0;background:none;border:none;color:#999;font-size:13px;cursor:pointer;">取消</button>

@@ -1152,7 +1152,7 @@ function renderMomentCard(m) {
     a.className = 'moment-link';
     a.href = m.link_url;
     a.target = '_blank';
-    a.innerHTML = m.link_title ? `<div class="moment-link-title">${m.link_title}</div><div style="color:#999;font-size:12px;">${m.link_url}</div>` : m.link_url;
+    a.innerHTML = m.link_title ? `<div class="moment-link-title">${m.link_title}</div><div style="color:var(--t-text-tertiary);font-size:12px;">${m.link_url}</div>` : m.link_url;
     card.appendChild(a);
   }
 
@@ -2263,7 +2263,7 @@ async function renderMomentsFeedInline() {
   // Header
   const header = document.createElement('div');
   header.className = 'moments-feed-header';
-  header.innerHTML = '<h2 style="font-size:16px;color:#333;">好友动态</h2>';
+  header.innerHTML = '<h2 style="font-size:16px;color:var(--t-text);">好友动态</h2>';
   messagesEl.appendChild(header);
 
   // Loading indicator

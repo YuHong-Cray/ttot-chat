@@ -739,3 +739,39 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
 
 /* ---- Scrollbars: thinner, themed ---- */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
+
+/* ============================================================
+   Dark theme — mirrors stp-harness (body[data-ds-dark-theme])
+   ============================================================ */
+body[data-ds-dark-theme] {
+  --t-bg: rgb(21, 21, 23);                 /* neutral-bluish-950 */
+  --t-bg-module: rgb(35, 35, 36);          /* neutral-bluish-875 */
+  --t-bg-hover: rgba(255, 255, 255, 0.08);
+  --t-bg-active: rgba(255, 255, 255, 0.14);
+  --t-bg-input: rgb(44, 44, 46);           /* neutral-bluish-850 */
+  --t-surface: rgb(44, 44, 46);            /* neutral-bluish-850 */
+  --t-border: rgba(255, 255, 255, 0.12);
+  --t-border-soft: rgba(255, 255, 255, 0.06);
+  --t-border-strong: rgba(255, 255, 255, 0.2);
+
+  --t-text: rgb(249, 250, 251);            /* neutral-bluish-50 */
+  --t-text-secondary: rgb(207, 211, 214);  /* neutral-bluish-300 */
+  --t-text-tertiary: rgb(173, 178, 184);   /* neutral-bluish-400 */
+  --t-text-placeholder: rgb(129, 133, 140);/* neutral-bluish-600 */
+
+  --t-accent: rgb(122, 170, 255);          /* deepseek-400 */
+  --t-accent-hover: rgb(65, 118, 230);     /* deepseek-500 */
+  --t-accent-soft: rgba(65, 118, 230, 0.24);
+  --t-on-accent: #ffffff;
+
+  --t-success: rgb(34, 197, 94);
+  --t-success-soft: rgba(34, 197, 94, 0.18);
+  --t-error: rgb(255, 99, 99);
+  --t-error-soft: rgba(236, 19, 19, 0.22);
+  --t-warn: rgb(245, 158, 11);
+  --t-warn-soft: rgba(245, 158, 11, 0.18);
+}
+
+/* Dark scrollbar */
+body[data-ds-dark-theme] ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); background-clip: padding-box; }
+body[data-ds-dark-theme] ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.3); background-clip: padding-box; }
